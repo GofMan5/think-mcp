@@ -267,3 +267,78 @@ export interface RecallResult {
     threshold: number;
   };
 }
+
+
+// ============================================
+// v4.0.0 - Burst Thinking Edition
+// ============================================
+
+/** Limits for burst thinking validation */
+export const BURST_LIMITS = {
+  maxThoughts: 30,
+  minThoughts: 1,
+  maxThoughtLength: 1000,
+  minThoughtLength: 50,
+  maxStagnationScore: 0.6,
+  minAvgEntropy: 0.25,
+  minAvgConfidence: 4,
+} as const;
+
+/** Single thought in a burst session */
+export interface BurstThought {
+  thoughtNumber: number;
+  thought: string;
+  confidence?: number;
+  subSteps?: string[];
+  alternatives?: string[];
+  isRevision?: boolean;
+  revisesThought?: number;
+  branchFromThought?: number;
+  branchId?: string;
+  extensions?: QuickExtension[];
+}
+
+/** Consolidation data for burst session */
+export interface BurstConsolidation {
+  winningPath: number[];
+  summary: string;
+  verdict: ConsolidateVerdict;
+}
+
+/** Input for submit_thinking_session tool */
+export interface SubmitSessionInput {
+  /** Session goal - required for burst thinking */
+  goal: string;
+  /** Array of thoughts (1-30) */
+  thoughts: BurstThought[];
+  /** Optional consolidation if ready */
+  consolidation?: BurstConsolidation;
+}
+
+/** Validation metrics for burst session */
+export interface BurstMetrics {
+  avgConfidence: number;
+  avgEntropy: number;
+  avgLength: number;
+  stagnationScore: number;
+  thoughtCount: number;
+}
+
+/** Validation result for burst session */
+export interface BurstValidation {
+  passed: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/** Result from submit_thinking_session tool */
+export interface SubmitSessionResult {
+  status: 'accepted' | 'rejected';
+  sessionId: string;
+  thoughtsProcessed: number;
+  validation: BurstValidation;
+  metrics: BurstMetrics;
+  thoughtTree?: string;
+  systemAdvice?: string;
+  errorMessage?: string;
+}

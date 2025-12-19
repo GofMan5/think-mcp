@@ -14,7 +14,7 @@ const thinkingService = new ThinkingService();
 
 const server = new McpServer({
   name: 'think-module-server',
-  version: '3.4.0',
+  version: '4.0.0',
 });
 
 // Adaptive tool description - guidelines, not mandates
@@ -519,6 +519,134 @@ server.registerTool(
   }
 );
 
+// ============================================
+// v4.0.0 - Burst Thinking: submit_thinking_session
+// ============================================
+
+const SUBMIT_SESSION_DESCRIPTION = `Submit a complete thinking session in one call (Burst Thinking).
+
+USE THIS when you have a complete reasoning chain ready - reduces N round-trips to 1.
+
+Input:
+- goal: Session goal (required, min 10 chars)
+- thoughts: Array of 1-30 thoughts with:
+  - thoughtNumber: Sequential number
+  - thought: Content (min 50 chars, max 1000 chars)
+  - confidence: 1-10 (optional)
+  - subSteps, alternatives, extensions (optional)
+  - isRevision, revisesThought (for revisions)
+  - branchFromThought, branchId (for branches)
+- consolidation: Optional {winningPath, summary, verdict}
+
+Validation (atomic - all or nothing):
+- Sequence check: thought numbers must be sequential
+- Stagnation check: Jaccard similarity < 60% between adjacent thoughts
+- Entropy check: vocabulary diversity > 0.25
+- Depth check: average length > 50 chars
+- Connectivity check: winning path must be logically connected
+
+Returns:
+- status: 'accepted' or 'rejected'
+- sessionId: Unique session identifier
+- metrics: avgConfidence, avgEntropy, avgLength, stagnationScore
+- validation: {passed, errors, warnings}
+
+⚠️ If rejected, fix ALL errors and resubmit the entire session.`;
+
+// Quick extension schema for burst thoughts
+const burstExtensionSchema = z.object({
+  type: z.enum(['critique', 'elaboration', 'correction', 'alternative_scenario', 'assumption_testing', 'innovation', 'optimization', 'polish']),
+  content: z.string(),
+  impact: z.enum(['low', 'medium', 'high', 'blocker']).optional(),
+});
+
+// Burst thought schema
+const burstThoughtSchema = z.object({
+  thoughtNumber: z.number().int().min(1),
+  thought: z.string().min(1),
+  confidence: z.number().min(1).max(10).optional(),
+  subSteps: z.array(z.string()).max(5).optional(),
+  alternatives: z.array(z.string()).max(5).optional(),
+  isRevision: z.boolean().optional(),
+  revisesThought: z.number().int().min(1).optional(),
+  branchFromThought: z.number().int().min(1).optional(),
+  branchId: z.string().optional(),
+  extensions: z.array(burstExtensionSchema).optional(),
+});
+
+// Consolidation schema
+const burstConsolidationSchema = z.object({
+  winningPath: z.array(z.number().int().min(1)),
+  summary: z.string(),
+  verdict: z.enum(['ready', 'needs_more_work']),
+});
+
+// Submit session input schema
+const submitSessionSchema = {
+  goal: z.string().min(10).describe('Session goal - required for burst thinking'),
+  thoughts: z.array(burstThoughtSchema).min(1).max(30).describe('Array of thoughts (1-30)'),
+  consolidation: burstConsolidationSchema.optional().describe('Optional consolidation if ready'),
+};
+
+// Register submit_thinking_session tool
+server.registerTool(
+  'submit_thinking_session',
+  {
+    title: 'Submit Thinking Session (Burst)',
+    description: SUBMIT_SESSION_DESCRIPTION,
+    inputSchema: submitSessionSchema,
+  },
+  async (args) => {
+    try {
+      const result = thinkingService.submitSession({
+        goal: args.goal as string,
+        thoughts: args.thoughts as import('./types/thought.types.js').BurstThought[],
+        consolidation: args.consolidation as import('./types/thought.types.js').BurstConsolidation | undefined,
+      });
+
+      if (result.status === 'rejected') {
+        return {
+          content: [{ type: 'text' as const, text: `🚫 SESSION REJECTED\n\nErrors:\n${result.validation.errors.map(e => `• ${e}`).join('\n')}\n\nFix ALL errors and resubmit.` }],
+          isError: true,
+        };
+      }
+
+      const responseText = [
+        '✅ BURST SESSION ACCEPTED',
+        '═'.repeat(40),
+        '',
+        `🎯 Goal: ${args.goal}`,
+        `📊 Thoughts processed: ${result.thoughtsProcessed}`,
+        `🆔 Session ID: ${result.sessionId.substring(0, 20)}...`,
+        '',
+        '📈 Metrics:',
+        `  • Avg Confidence: ${result.metrics.avgConfidence}/10`,
+        `  • Avg Entropy: ${result.metrics.avgEntropy}`,
+        `  • Avg Length: ${result.metrics.avgLength} chars`,
+        `  • Stagnation Score: ${result.metrics.stagnationScore}`,
+        '',
+        result.validation.warnings.length > 0 
+          ? `⚠️ Warnings:\n${result.validation.warnings.map(w => `  • ${w}`).join('\n')}` 
+          : '✓ No warnings',
+        '',
+        result.thoughtTree ? `${result.thoughtTree}` : '',
+        result.systemAdvice ? `\n${result.systemAdvice}` : '',
+      ].filter(Boolean).join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text: responseText }],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Submit session error:', message);
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
 // Start server with stdio transport
 async function main() {
   // Restore previous session if exists
@@ -526,7 +654,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Think Module MCP Server v3.4.0 (Recall Edition) running on stdio');
+  console.error('Think Module MCP Server v4.0.0 (Burst Thinking Edition) running on stdio');
 }
 
 main().catch((error) => {

@@ -41,6 +41,10 @@ import type {
   RecallMatch,
   RecallScope,
   RecallSearchIn,
+  // v4.0.0 - Burst Thinking
+  SubmitSessionInput,
+  SubmitSessionResult,
+  BurstMetrics,
 } from '../types/thought.types.js';
 
 // Session file path (relative to module directory)
@@ -1931,6 +1935,309 @@ export class ThinkingService {
     }
 
     return sections.join('\n');
+  }
+
+  // ============================================
+  // v4.0.0 - Burst Thinking Edition
+  // ============================================
+
+  /**
+   * SUBMIT THINKING SESSION (v4.0.0) - Burst Thinking
+   * Accepts a complete thinking session in one call for atomic validation
+   * Reduces round-trips from N to 1 for complex reasoning chains
+   */
+  submitSession(input: import('../types/thought.types.js').SubmitSessionInput): import('../types/thought.types.js').SubmitSessionResult {
+    const { goal, thoughts, consolidation } = input;
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Import limits from types
+    const BURST_LIMITS = {
+      maxThoughts: 30,
+      minThoughts: 1,
+      maxThoughtLength: 1000,
+      minThoughtLength: 50,
+      maxStagnationScore: 0.6,
+      minAvgEntropy: 0.25,
+      minAvgConfidence: 4,
+    };
+
+    // === PHASE 1: Basic Validation ===
+    
+    // Validate goal
+    if (!goal || goal.trim().length < 10) {
+      errors.push('Goal is required and must be at least 10 characters');
+    }
+
+    // Validate thoughts array
+    if (!thoughts || thoughts.length === 0) {
+      errors.push('At least 1 thought is required');
+    } else if (thoughts.length > BURST_LIMITS.maxThoughts) {
+      errors.push(`Too many thoughts: ${thoughts.length} > ${BURST_LIMITS.maxThoughts} max`);
+    }
+
+    // Early exit if basic validation fails
+    if (errors.length > 0) {
+      return {
+        status: 'rejected',
+        sessionId: '',
+        thoughtsProcessed: 0,
+        validation: { passed: false, errors, warnings },
+        metrics: { avgConfidence: 0, avgEntropy: 0, avgLength: 0, stagnationScore: 0, thoughtCount: 0 },
+        errorMessage: errors.join('; '),
+      };
+    }
+
+    // === PHASE 2: Sequence Validation ===
+    
+    // Check thought numbers are sequential
+    const sortedThoughts = [...thoughts].sort((a, b) => a.thoughtNumber - b.thoughtNumber);
+    for (let i = 0; i < sortedThoughts.length; i++) {
+      const expected = i + 1;
+      const actual = sortedThoughts[i].thoughtNumber;
+      if (actual !== expected && !sortedThoughts[i].isRevision) {
+        errors.push(`Sequence break: expected thought #${expected}, got #${actual}`);
+        break;
+      }
+    }
+
+    // Check for duplicate thought numbers (excluding revisions)
+    const nonRevisionNumbers = thoughts.filter(t => !t.isRevision).map(t => t.thoughtNumber);
+    const duplicates = nonRevisionNumbers.filter((n, i) => nonRevisionNumbers.indexOf(n) !== i);
+    if (duplicates.length > 0) {
+      errors.push(`Duplicate thought numbers: ${[...new Set(duplicates)].join(', ')}`);
+    }
+
+    // === PHASE 3: Content Quality Validation ===
+    
+    let totalLength = 0;
+    let totalEntropy = 0;
+    let totalConfidence = 0;
+    let confidenceCount = 0;
+
+    for (const t of thoughts) {
+      // Min length check
+      if (t.thought.length < BURST_LIMITS.minThoughtLength) {
+        errors.push(`Thought #${t.thoughtNumber} too short: ${t.thought.length} < ${BURST_LIMITS.minThoughtLength} chars`);
+      }
+      // Max length check
+      if (t.thought.length > BURST_LIMITS.maxThoughtLength) {
+        warnings.push(`Thought #${t.thoughtNumber} truncated: ${t.thought.length} > ${BURST_LIMITS.maxThoughtLength} chars`);
+      }
+
+      totalLength += Math.min(t.thought.length, BURST_LIMITS.maxThoughtLength);
+      totalEntropy += this.calculateWordEntropy(t.thought);
+      
+      if (t.confidence !== undefined) {
+        totalConfidence += t.confidence;
+        confidenceCount++;
+      }
+
+      // Validate revision targets
+      if (t.isRevision && t.revisesThought !== undefined) {
+        const targetExists = thoughts.some(other => other.thoughtNumber === t.revisesThought);
+        if (!targetExists) {
+          errors.push(`Revision #${t.thoughtNumber} targets non-existent thought #${t.revisesThought}`);
+        }
+      }
+
+      // Validate branch sources
+      if (t.branchFromThought !== undefined) {
+        const sourceExists = thoughts.some(other => other.thoughtNumber === t.branchFromThought);
+        if (!sourceExists) {
+          errors.push(`Branch in thought #${t.thoughtNumber} from non-existent thought #${t.branchFromThought}`);
+        }
+      }
+    }
+
+    // === PHASE 4: Stagnation Detection ===
+    
+    let stagnationScore = 0;
+    if (thoughts.length >= 2) {
+      let totalSimilarity = 0;
+      let comparisons = 0;
+      
+      for (let i = 1; i < thoughts.length; i++) {
+        const similarity = this.calculateJaccardSimilarity(
+          thoughts[i].thought,
+          thoughts[i - 1].thought
+        );
+        totalSimilarity += similarity;
+        comparisons++;
+      }
+      
+      stagnationScore = comparisons > 0 ? totalSimilarity / comparisons : 0;
+      
+      if (stagnationScore > BURST_LIMITS.maxStagnationScore) {
+        errors.push(`Stagnation detected: ${(stagnationScore * 100).toFixed(0)}% avg similarity > ${BURST_LIMITS.maxStagnationScore * 100}% threshold`);
+      }
+    }
+
+    // === PHASE 5: Calculate Metrics ===
+    
+    const avgLength = thoughts.length > 0 ? totalLength / thoughts.length : 0;
+    const avgEntropy = thoughts.length > 0 ? totalEntropy / thoughts.length : 0;
+    const avgConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
+
+    // Entropy check
+    if (avgEntropy < BURST_LIMITS.minAvgEntropy && thoughts.length > 2) {
+      warnings.push(`Low vocabulary diversity: ${avgEntropy.toFixed(2)} < ${BURST_LIMITS.minAvgEntropy} threshold`);
+    }
+
+    // Confidence check
+    if (avgConfidence < BURST_LIMITS.minAvgConfidence && confidenceCount > 0) {
+      warnings.push(`Low average confidence: ${avgConfidence.toFixed(1)} < ${BURST_LIMITS.minAvgConfidence} threshold`);
+    }
+
+    // === PHASE 6: Consolidation Validation (if provided) ===
+    
+    if (consolidation) {
+      const { winningPath, verdict } = consolidation;
+      
+      // Validate path references
+      const thoughtNumbers = new Set(thoughts.map(t => t.thoughtNumber));
+      const invalidRefs = winningPath.filter(n => !thoughtNumbers.has(n));
+      if (invalidRefs.length > 0) {
+        errors.push(`Invalid winning path references: ${invalidRefs.join(', ')}`);
+      }
+
+      // Validate path connectivity
+      if (winningPath.length > 1 && invalidRefs.length === 0) {
+        // Build thought map for connectivity check
+        const thoughtMap = new Map(thoughts.map(t => [t.thoughtNumber, t]));
+        
+        for (let i = 1; i < winningPath.length; i++) {
+          const current = winningPath[i];
+          const previous = winningPath[i - 1];
+          const currentThought = thoughtMap.get(current);
+          
+          if (!currentThought) continue;
+          
+          const validPredecessors = new Set<number>([current - 1]);
+          if (currentThought.branchFromThought) validPredecessors.add(currentThought.branchFromThought);
+          if (currentThought.isRevision && currentThought.revisesThought) {
+            validPredecessors.add(currentThought.revisesThought);
+            validPredecessors.add(currentThought.revisesThought - 1);
+          }
+          
+          if (!validPredecessors.has(previous)) {
+            errors.push(`Path discontinuity: #${current} cannot follow #${previous}`);
+            break;
+          }
+        }
+      }
+
+      // Check for unaddressed blockers in winning path
+      if (verdict === 'ready') {
+        for (const num of winningPath) {
+          const thought = thoughts.find(t => t.thoughtNumber === num);
+          if (thought?.extensions) {
+            const hasBlocker = thought.extensions.some(e => e.impact === 'blocker');
+            if (hasBlocker) {
+              const hasRevision = thoughts.some(t => t.isRevision && t.revisesThought === num);
+              if (!hasRevision) {
+                errors.push(`Unaddressed blocker in thought #${num} - cannot mark as ready`);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // === PHASE 7: Decision ===
+    
+    const passed = errors.length === 0;
+    const metrics: import('../types/thought.types.js').BurstMetrics = {
+      avgConfidence: Math.round(avgConfidence * 10) / 10,
+      avgEntropy: Math.round(avgEntropy * 100) / 100,
+      avgLength: Math.round(avgLength),
+      stagnationScore: Math.round(stagnationScore * 100) / 100,
+      thoughtCount: thoughts.length,
+    };
+
+    if (!passed) {
+      console.error(`🚫 Burst session REJECTED: ${errors.length} errors`);
+      return {
+        status: 'rejected',
+        sessionId: '',
+        thoughtsProcessed: 0,
+        validation: { passed: false, errors, warnings },
+        metrics,
+        errorMessage: errors.join('; '),
+      };
+    }
+
+    // === PHASE 8: Commit Session ===
+    
+    // Generate new session ID
+    this.currentSessionId = new Date().toISOString();
+    this.sessionGoal = goal;
+    
+    // Clear previous session
+    this.reset();
+    
+    // Convert BurstThoughts to ThoughtRecords and add to history
+    for (const t of sortedThoughts) {
+      const record: ThoughtRecord = {
+        thought: t.thought.substring(0, BURST_LIMITS.maxThoughtLength),
+        thoughtNumber: t.thoughtNumber,
+        totalThoughts: thoughts.length,
+        nextThoughtNeeded: t.thoughtNumber < thoughts.length,
+        confidence: t.confidence,
+        subSteps: t.subSteps,
+        alternatives: t.alternatives,
+        isRevision: t.isRevision,
+        revisesThought: t.revisesThought,
+        branchFromThought: t.branchFromThought,
+        branchId: t.branchId,
+        timestamp: Date.now(),
+        sessionId: this.currentSessionId,
+        extensions: t.extensions?.map(e => ({
+          type: e.type,
+          content: e.content,
+          impact: e.impact ?? 'medium',
+          timestamp: new Date().toISOString(),
+        })),
+      };
+      
+      this.thoughtHistory.push(record);
+      this.lastThoughtNumber = Math.max(this.lastThoughtNumber, t.thoughtNumber);
+      
+      // Handle branches
+      if (t.branchFromThought && t.branchId) {
+        const branchHistory = this.branches.get(t.branchId) ?? [];
+        branchHistory.push(record);
+        this.branches.set(t.branchId, branchHistory);
+      }
+    }
+
+    // Invalidate Fuse index
+    this.invalidateFuseIndex();
+
+    // Save session
+    this.saveSession().catch(err => console.error('Failed to save burst session:', err));
+
+    // Generate system advice
+    let systemAdvice: string | undefined;
+    if (warnings.length > 0) {
+      systemAdvice = `⚠️ Warnings: ${warnings.join('; ')}`;
+    }
+    if (!consolidation) {
+      systemAdvice = (systemAdvice ? systemAdvice + '\n' : '') + 
+        '💡 TIP: Call consolidate_and_verify to formally close the session.';
+    }
+
+    console.error(`✅ Burst session ACCEPTED: ${thoughts.length} thoughts, session=${this.currentSessionId.substring(0, 10)}...`);
+
+    return {
+      status: 'accepted',
+      sessionId: this.currentSessionId,
+      thoughtsProcessed: thoughts.length,
+      validation: { passed: true, errors: [], warnings },
+      metrics,
+      thoughtTree: this.generateAsciiTree(),
+      systemAdvice,
+    };
   }
 
   // ============================================
