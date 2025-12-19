@@ -3,7 +3,7 @@
   "version": "3.4.0",
   "type": "module",
   "description": "MCP Server for structured sequential thinking with branching, revisions, dead-ends tracking, and fuzzy recall",
-  "author": "GofMan5",
+  "author": "GofMan3",
   "license": "MIT",
   "repository": {
     "type": "git",

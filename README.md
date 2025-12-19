@@ -15,13 +15,13 @@ MCP Server for structured sequential thinking. Helps LLMs break down complex pro
 ### Using npx (recommended)
 
 ```bash
-npx @gofman5/think-mcp
+npx @gofman3/think-mcp
 ```
 
 ### Install globally
 
 ```bash
-npm install -g @gofman5/think-mcp
+npm install -g @gofman3/think-mcp
 think-mcp
 ```
 
@@ -34,7 +34,7 @@ Add to your MCP config (`mcp.json`):
   "mcpServers": {
     "think": {
       "command": "npx",
-      "args": ["@gofman5/think-mcp"]
+      "args": ["@gofman3/think-mcp"]
     }
   }
 }
