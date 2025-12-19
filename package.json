@@ -1,0 +1,58 @@
+{
+  "name": "@gofman3/think-mcp",
+  "version": "3.4.0",
+  "type": "module",
+  "description": "MCP Server for structured sequential thinking with branching, revisions, dead-ends tracking, and fuzzy recall",
+  "author": "GofMan5",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GofMan5/think-mcp.git"
+  },
+  "homepage": "https://github.com/GofMan5/think-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/GofMan5GofMan5/think-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "thinking",
+    "reasoning",
+    "ai",
+    "llm",
+    "sequential-thinking",
+    "claude",
+    "anthropic"
+  ],
+  "main": "dist/index.js",
+  "bin": {
+    "think-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "clean": "rimraf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "fuse.js": "^7.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "rimraf": "^5.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
