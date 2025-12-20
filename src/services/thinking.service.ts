@@ -2101,10 +2101,11 @@ export class ThinkingService {
         errors.push(`Invalid winning path references: ${invalidRefs.join(', ')}`);
       }
 
-      // Validate path connectivity
+      // Validate path connectivity (WARNING, not ERROR - allows selective paths)
       if (winningPath.length > 1 && invalidRefs.length === 0) {
         // Build thought map for connectivity check
         const thoughtMap = new Map(thoughts.map(t => [t.thoughtNumber, t]));
+        const pathGaps: string[] = [];
         
         for (let i = 1; i < winningPath.length; i++) {
           const current = winningPath[i];
@@ -2121,9 +2122,13 @@ export class ThinkingService {
           }
           
           if (!validPredecessors.has(previous)) {
-            errors.push(`Path discontinuity: #${current} cannot follow #${previous}`);
-            break;
+            // Changed from error to warning - allows selective key thoughts in path
+            pathGaps.push(`#${previous}→#${current}`);
           }
+        }
+        
+        if (pathGaps.length > 0) {
+          warnings.push(`Path has gaps (${pathGaps.join(', ')}). Consider using branches or including intermediate thoughts for full traceability.`);
         }
       }
 
