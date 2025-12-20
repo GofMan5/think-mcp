@@ -1,6 +1,6 @@
 {
   "name": "@gofman3/think-mcp",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "type": "module",
   "description": "MCP Server for structured sequential thinking with Burst Thinking, branching, revisions, dead-ends tracking, and fuzzy recall",
   "author": "GofMan3",
