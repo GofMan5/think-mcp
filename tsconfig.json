@@ -13,7 +13,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

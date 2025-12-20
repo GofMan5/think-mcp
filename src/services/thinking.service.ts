@@ -22,118 +22,70 @@
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import Fuse from 'fuse.js';
 import type {
   ThoughtInput,
   ThoughtRecord,
   ThoughtSummary,
   ThinkingResult,
-  ValidationResult,
   ExtendThoughtInput,
   ExtendThoughtResult,
   ThoughtExtension,
-  SessionData,
-  PathConnectivityResult,
   QuickExtension,
   DeadEnd,
   RecallInput,
   RecallResult,
-  RecallMatch,
   RecallScope,
-  RecallSearchIn,
+  ValidationResult,
+  PathConnectivityResult,
   // v4.0.0 - Burst Thinking
   SubmitSessionInput,
   SubmitSessionResult,
-  BurstMetrics,
 } from '../types/thought.types.js';
+
+// Import constants from dedicated modules
+import {
+  RETAIN_FULL_THOUGHTS,
+  MAX_DEAD_ENDS,
+  SESSION_TTL_HOURS,
+  SESSION_FILE_NAME,
+  RECENT_WEIGHT_MULTIPLIER,
+  RECENT_THOUGHTS_COUNT,
+} from '../constants/index.js';
+
+// Import visualization service
+import { VisualizationService } from './visualization.service.js';
+
+// Import validation service
+import { ValidationService } from './validation.service.js';
+
+// Import stagnation service
+import { StagnationService } from './stagnation.service.js';
+
+// Import consolidate service
+import { ConsolidateService } from './consolidate.service.js';
+
+// Import recall service
+import { RecallService } from './recall.service.js';
+
+// Import export service
+import { ExportService } from './export.service.js';
+
+// Import burst service
+import { BurstService } from './burst.service.js';
+
+// Import coaching service
+import { CoachingService } from './coaching.service.js';
+
+// Import insights service (v4.1.0)
+import { InsightsService } from './insights.service.js';
+
+// Import nudge service (v4.6.0)
+import { NudgeService } from './nudge.service.js';
 
 // Session file path (relative to module directory)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const SESSION_FILE = join(__dirname, '..', '..', 'thought_session.json');
-
-// Configuration constants
-const RETAIN_FULL_THOUGHTS = 5; // Keep last N thoughts in full detail
-const STAGNATION_CHECK_COUNT = 3; // Check last N thoughts for similarity
-const SIMILARITY_THRESHOLD = 50; // Compare first N chars for stagnation
-const RECENT_WEIGHT_MULTIPLIER = 2; // Weight multiplier for last 3 thoughts in confidence calc
-const RECENT_THOUGHTS_COUNT = 3; // Number of recent thoughts to weight higher
-const MIN_ENTROPY_THRESHOLD = 0.25; // Minimum word entropy before warning
-const JACCARD_STAGNATION_THRESHOLD = 0.75; // Jaccard similarity threshold for stagnation detection
-
-// Technical short terms whitelist for entropy calculation (not filtered by length)
-const TECHNICAL_SHORT_TERMS = new Set([
-  'api', 'ui', 'db', 'id', 'io', 'os', 'ip', 'url', 'css', 'sql', 'xml', 'jwt', 'mcp',
-  'cli', 'sdk', 'cdn', 'dns', 'ssh', 'ssl', 'tls', 'http', 'json', 'yaml', 'toml',
-]);
-const LINEAR_THINKING_THRESHOLD = 6; // Thoughts before lateral thinking warning
-const ESCALATING_PRESSURE_INTERVAL = 3; // Every N thoughts, increase pressure
-const MAX_THOUGHTS_BUDGET = 12; // Complexity budget - warn to consolidate after this many thoughts
-
-// Proactive Coach patterns for lens recommendations (v2.9.1)
-const OPTIMIZATION_TRIGGERS = [
-  'todo', 'fixme', 'hack', 'потом', 'позже', 'оптимизировать', 'рефакторинг',
-  'медленно', 'память', 'performance', 'slow', 'memory', 'refactor', 'cleanup',
-  'технический долг', 'tech debt', 'временное решение', 'workaround',
-];
-
-const UNCERTAINTY_TRIGGERS = [
-  'возможно', 'наверное', 'думаю что', 'скорее всего', 'предполагаю',
-  'может быть', 'вероятно', 'не уверен', 'perhaps', 'maybe', 'probably',
-  'i think', 'i assume', 'might be', 'could be', 'not sure', 'uncertain',
-];
-
-const POLISH_THRESHOLD_CONFIDENCE = 8; // Recommend polish when confidence >= this
-const INNOVATION_THRESHOLD_THOUGHTS = 8; // Recommend innovation after this many thoughts
-
-// Pre-Consolidation Audit thresholds (v2.9.2)
-const DEPTH_METRIC_SIMPLE = 100; // Min avg thought length for simple tasks (<=5 thoughts)
-const DEPTH_METRIC_MEDIUM = 150; // Min avg thought length for medium tasks (6-10 thoughts)
-const DEPTH_METRIC_COMPLEX = 200; // Min avg thought length for complex tasks (11+ thoughts)
-
-// Proactive Coach v3.1.0 - Enhanced nudges
-const MIN_THOUGHT_LENGTH = 50; // Minimum thought length before warning
-const LOW_CONFIDENCE_THRESHOLD = 5; // Confidence below this triggers advice
-const NO_CRITIQUE_THRESHOLD = 5; // Warn about missing critique after N thoughts
-
-// v3.2.0 - Reliability Edition constants
-const SESSION_TTL_HOURS = 24; // Auto-reset session after this many hours
-const COACH_COOLDOWN_COUNT = 3; // Don't repeat same advice within N thoughts
-const SMART_PRUNING_THRESHOLD = 10; // Start pruning context after N thoughts
-
-// v3.3.1 - Bulletproof Edition constants
-const MAX_DEAD_ENDS = 20; // Limit dead ends to prevent memory bloat
-const NEAR_LIMIT_CONFIDENCE_THRESHOLD = 6; // Warn if near limit with low confidence
-
-// Common filler phrases and stop words to normalize out for stagnation/entropy detection
-const FILLER_PHRASES = [
-  // English filler phrases
-  'in this step', 'i will', 'let me', 'now i', 'first', 'next', 'then',
-  'carefully', 'analyze', 'consider', 'looking at', 'examining', 'reviewing',
-  'based on', 'according to', 'as we can see', 'it appears that',
-  // English stop words
-  'the', 'a', 'an', 'of', 'is', 'to', 'and', 'or', 'but', 'in', 'on', 'at',
-  'for', 'with', 'this', 'that', 'it', 'be', 'are', 'was', 'were', 'been',
-  // Russian stop words
-  'и', 'в', 'на', 'с', 'по', 'к', 'у', 'о', 'из', 'за', 'от', 'до',
-  'то', 'что', 'это', 'как', 'для', 'не', 'но', 'да', 'же', 'ли', 'бы',
-];
-
-// v3.4.0 - Recall Edition constants
-const RECALL_DEFAULT_LIMIT = 3;
-const RECALL_DEFAULT_THRESHOLD = 0.4;
-const RECALL_SNIPPET_CONTEXT = 100; // Characters before/after match for snippet
-
-/** Searchable item for Fuse.js index */
-interface FuseSearchItem {
-  thoughtNumber: number;
-  content: string;
-  type: 'thought' | 'extension' | 'alternative' | 'subStep';
-  extensionType?: string;
-  confidence?: number;
-  sessionId?: string;
-  originalThought: string;
-}
+const SESSION_FILE = join(__dirname, '..', '..', SESSION_FILE_NAME);
 
 export class ThinkingService {
   private thoughtHistory: ThoughtRecord[] = [];
@@ -147,16 +99,38 @@ export class ThinkingService {
   /** Promise-based lock for FS operations to prevent race conditions */
   private fsLock: Promise<void> = Promise.resolve();
 
-  /** Coach cooldown - track recent advices to prevent spam (v3.2.0) */
-  private recentAdvices: string[] = [];
-
   /** Dead ends - paths that were rejected (v3.3.0) */
   private deadEnds: DeadEnd[] = [];
 
-  /** Fuse.js instance for fuzzy search (v3.4.0) - lazy initialized */
-  private fuseIndex: Fuse<FuseSearchItem> | null = null;
-  /** Flag to track if index needs rebuild */
-  private fuseIndexDirty = true;
+  /** Visualization service for ASCII tree and Mermaid generation */
+  private visualizationService = new VisualizationService();
+
+  /** Validation service for sequence and path validation */
+  private validationService = new ValidationService();
+
+  /** Stagnation service for detecting repetitive thinking */
+  private stagnationService = new StagnationService();
+
+  /** Consolidate service for meta-cognitive audit */
+  private consolidateService = new ConsolidateService();
+
+  /** Recall service for fuzzy search */
+  private recallService = new RecallService();
+
+  /** Coaching service for proactive advice */
+  private coachingService = new CoachingService();
+
+  /** Export service for session reports */
+  private exportService = new ExportService();
+
+  /** Burst service for session validation */
+  private burstService = new BurstService();
+
+  /** Insights service for cross-session learning (v4.1.0) */
+  private insightsService = new InsightsService();
+
+  /** Nudge service for proactive micro-prompts (v4.6.0) */
+  private nudgeService = new NudgeService();
 
   /**
    * Get the start index of current session (after last thought #1)
@@ -351,7 +325,8 @@ export class ThinkingService {
     }
 
     // LATERAL THINKING TRIGGER - check for overly linear thinking
-    let systemAdvice = this.checkLateralThinking();
+    // v5.0.1: Pass isFinishing flag to show subSteps check only at end
+    let systemAdvice = this.checkLateralThinking(!input.nextThoughtNeeded);
 
     // DEAD ENDS CHECK (v3.3.0) - Warn if heading towards rejected path
     const deadEndWarning = this.checkDeadEnds(input.thoughtNumber);
@@ -373,6 +348,10 @@ export class ThinkingService {
       }
     }
 
+    // v4.6.0: Generate nudge only if no other warnings/advice (avoid noise)
+    const shouldSkipNudge = !!(warning || systemAdvice);
+    const nudge = this.nudgeService.generateNudge(input, this.getCurrentSessionThoughts(), shouldSkipNudge);
+
     return {
       thoughtNumber: input.thoughtNumber,
       totalThoughts: input.totalThoughts,
@@ -381,357 +360,75 @@ export class ThinkingService {
       thoughtHistoryLength: this.thoughtHistory.length,
       contextSummary: this.generateContextSummary(),
       thoughtTree: this.generateAsciiTree(),
-      thoughtTreeMermaid: this.generateMermaid(),
+      // v4.2.0: Lazy Mermaid - removed from hot path, use export_session for diagrams
+      thoughtTreeMermaid: undefined,
       warning: warning || undefined,
       averageConfidence: this.calculateAverageConfidence(),
       systemAdvice,
       sessionGoal: this.sessionGoal,
+      nudge,
     };
-  }
-
-
-  /**
-   * Calculate Jaccard similarity (0-1) between two texts
-   * Uses word-level comparison after normalization
-   * More accurate than substring comparison for stagnation detection
-   */
-  private calculateJaccardSimilarity(text1: string, text2: string): number {
-    const getWords = (text: string): Set<string> => {
-      return new Set(
-        this.normalizeForComparison(text)
-          .split(/\s+/)
-          .filter(w => w.length > 2 || TECHNICAL_SHORT_TERMS.has(w.toLowerCase()))
-      );
-    };
-    
-    const words1 = getWords(text1);
-    const words2 = getWords(text2);
-    
-    if (words1.size === 0 || words2.size === 0) return 0;
-    
-    const intersection = [...words1].filter(w => words2.has(w)).length;
-    const union = new Set([...words1, ...words2]).size;
-    
-    return union > 0 ? intersection / union : 0;
-  }
-
-  /**
-   * Calculate simple text similarity (0-1) using normalized comparison
-   * @deprecated Use calculateJaccardSimilarity for better accuracy
-   */
-  private calculateTextSimilarity(text1: string, text2: string): number {
-    return this.calculateJaccardSimilarity(text1, text2);
   }
 
   /**
    * Validate thought sequence - prevent skipping steps and invalid revisions
-   * Also validates revision content is meaningfully different
+   * Delegates to ValidationService
    */
   private validateSequence(input: ThoughtInput): ValidationResult {
-    // Validate revision target - can't revise future or non-existent thoughts
-    if (input.isRevision && input.revisesThought !== undefined) {
-      const sessionThoughts = this.getCurrentSessionThoughts();
-      const targetThought = sessionThoughts.find((t) => t.thoughtNumber === input.revisesThought);
-      
-      if (!targetThought) {
-        return {
-          valid: false,
-          warning: `🚫 INVALID REVISION: Cannot revise thought #${input.revisesThought} - it doesn't exist in current session. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ')}`,
-        };
-      }
-
-      // Check revision is meaningfully different from original
-      const similarity = this.calculateTextSimilarity(input.thought, targetThought.thought);
-      if (similarity > 0.85) {
-        return {
-          valid: false,
-          warning: `⚠️ SHALLOW REVISION: Your revision is ${Math.round(similarity * 100)}% similar to the original. A meaningful revision should substantially change the content. Rewrite with more significant changes.`,
-        };
-      }
-
-      // Check for circular revision (revision text similar to even earlier thought)
-      const earlierThoughts = sessionThoughts.filter(t => 
-        t.thoughtNumber < input.revisesThought! && !t.isRevision
-      );
-      for (const earlier of earlierThoughts) {
-        const circularSimilarity = this.calculateTextSimilarity(input.thought, earlier.thought);
-        if (circularSimilarity > 0.8) {
-          return {
-            valid: false,
-            warning: `🔄 CIRCULAR REVISION DETECTED: Your revision is ${Math.round(circularSimilarity * 100)}% similar to thought #${earlier.thoughtNumber}. You may be going in circles. Try a genuinely new approach.`,
-          };
-        }
-      }
-    }
-
-    // Allow revisions and branches to jump in sequence
-    if (input.isRevision || input.branchFromThought) {
-      return { valid: true };
-    }
-
-    // First thought is always valid
-    if (this.lastThoughtNumber === 0) {
-      return { valid: true };
-    }
-
-    const expectedNext = this.lastThoughtNumber + 1;
-    if (input.thoughtNumber > expectedNext) {
-      return {
-        valid: false,
-        warning: `⚠️ Sequence break detected! Expected step ${expectedNext}, got ${input.thoughtNumber}. Don't skip steps - think through each one.`,
-      };
-    }
-
-    return { valid: true };
+    return this.validationService.validateSequence(
+      input,
+      this.getCurrentSessionThoughts(),
+      this.lastThoughtNumber
+    );
   }
 
   /**
    * HARD duplicate check - returns error message if duplicate found
-   * Used for strict rejection before adding to history
+   * Delegates to ValidationService
    */
   private checkDuplicateStrict(input: ThoughtInput): string | undefined {
-    if (input.isRevision) return undefined; // Revisions are allowed to reuse numbers
-
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    const exists = sessionThoughts.some((t) => t.thoughtNumber === input.thoughtNumber);
-
-    if (exists) {
-      return `🚫 REJECTED: Thought #${input.thoughtNumber} already exists in this session. Use isRevision: true to revise it, or extend_thought to add critique/elaboration.`;
-    }
-    return undefined;
+    return this.validationService.checkDuplicateStrict(input, this.getCurrentSessionThoughts());
   }
 
   /**
    * Validate branch source - reject if branchFromThought references non-existent thought
+   * Delegates to ValidationService
    */
   private validateBranchSource(input: ThoughtInput): string | undefined {
-    if (!input.branchFromThought) return undefined;
-
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    const sourceExists = sessionThoughts.some((t) => t.thoughtNumber === input.branchFromThought);
-
-    if (!sourceExists) {
-      return `🚫 INVALID BRANCH: Cannot branch from thought #${input.branchFromThought} - it doesn't exist in current session. Available thoughts: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ') || 'none'}`;
-    }
-    return undefined;
+    return this.validationService.validateBranchSource(input, this.getCurrentSessionThoughts());
   }
 
   /**
    * LATERAL THINKING TRIGGER with escalating pressure
-   * Warns if thinking is too linear (no branches, no extensions)
-   * Also checks for forgotten branches, declining entropy, and subSteps completion
+   * Delegates to CoachingService
+   * @param isFinishing - True if nextThoughtNeeded=false (v5.0.1)
    */
-  private checkLateralThinking(): string | undefined {
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    const thoughtCount = sessionThoughts.length;
-    const advices: string[] = [];
-
-    // Self-checklist: remind about subSteps from previous thought
-    if (thoughtCount >= 2) {
-      const prevThought = sessionThoughts[thoughtCount - 2];
-      if (prevThought.subSteps && prevThought.subSteps.length > 0) {
-        advices.push(`📋 SELF-CHECK: Previous thought #${prevThought.thoughtNumber} had ${prevThought.subSteps.length} sub-steps: [${prevThought.subSteps.join(', ')}]. Did you complete them all?`);
-      }
-    }
-
-    // Check for forgotten branches (created but not revisited in last 3 thoughts)
-    if (this.branches.size > 0 && thoughtCount > 3) {
-      const recentThoughts = sessionThoughts.slice(-3);
-      const recentBranchIds = new Set(
-        recentThoughts.filter(t => t.branchId).map(t => t.branchId)
-      );
-      
-      for (const branchId of this.branches.keys()) {
-        if (!recentBranchIds.has(branchId)) {
-          advices.push(`🌿 FORGOTTEN BRANCH: You have an open branch "${branchId}" that hasn't been touched in 3+ thoughts. Consider integrating it into your solution or explicitly closing it via consolidate.`);
-          break; // Only warn about one branch at a time
-        }
-      }
-    }
-
-    // Check for declining entropy in recent thoughts
-    if (thoughtCount >= 3) {
-      const recentThoughts = sessionThoughts.slice(-3);
-      const entropies = recentThoughts.map(t => this.calculateWordEntropy(t.thought));
-      const avgEntropy = entropies.reduce((a, b) => a + b, 0) / entropies.length;
-      const isDecreasing = entropies[2] < entropies[1] && entropies[1] < entropies[0];
-      
-      if (avgEntropy < MIN_ENTROPY_THRESHOLD || (isDecreasing && entropies[2] < 0.3)) {
-        advices.push(`📉 ENTROPY DECLINING: Your recent thoughts show decreasing vocabulary diversity (avg: ${avgEntropy.toFixed(2)}). This may indicate repetitive thinking. Try expressing your reasoning with different words or explore a new angle.`);
-      }
-    }
-
-    // Only trigger linear thinking check after threshold
-    if (thoughtCount >= LINEAR_THINKING_THRESHOLD) {
-      const hasExtensions = sessionThoughts.some((t) => t.extensions && t.extensions.length > 0);
-      const hasBranches = sessionThoughts.some((t) => t.branchFromThought !== undefined);
-
-      if (!hasExtensions && !hasBranches) {
-        const pressureLevel = Math.floor((thoughtCount - LINEAR_THINKING_THRESHOLD) / ESCALATING_PRESSURE_INTERVAL) + 1;
-        
-        if (pressureLevel === 1) {
-          advices.push('💡 LATERAL THINKING: Your reasoning appears too linear. Consider using extend_thought with "critique" or create a branch.');
-        } else if (pressureLevel === 2) {
-          advices.push('⚠️ LATERAL WARNING: Still no branches or critiques. STRONGLY consider using extend_thought with "assumption_testing".');
-        } else {
-          advices.push(`🚨 CRITICAL: ${thoughtCount} thoughts with ZERO lateral exploration. STOP and critique your approach.`);
-        }
-      }
-    }
-
-    // Complexity Budget - escalating pressure to consolidate
-    if (thoughtCount >= MAX_THOUGHTS_BUDGET) {
-      const overBudget = thoughtCount - MAX_THOUGHTS_BUDGET;
-      if (overBudget === 0) {
-        advices.push(`💰 COMPLEXITY BUDGET: You've reached ${MAX_THOUGHTS_BUDGET} thoughts. Consider calling consolidate_and_verify to synthesize your reasoning.`);
-      } else if (overBudget <= 3) {
-        advices.push(`⚠️ OVER BUDGET: ${thoughtCount} thoughts without consolidation. Time to wrap up - call consolidate_and_verify NOW.`);
-      } else {
-        advices.push(`🚨 ANALYSIS PARALYSIS: ${thoughtCount} thoughts is excessive. STOP adding thoughts and call consolidate_and_verify immediately!`);
-      }
-    }
-
-    // PROACTIVE COACH (v2.9.1) - Smart lens recommendations based on content analysis
-    const coachAdvice = this.generateProactiveCoachAdvice(sessionThoughts);
-    if (coachAdvice) {
-      advices.push(coachAdvice);
-    }
-
-    return advices.length > 0 ? advices.join('\n') : undefined;
+  private checkLateralThinking(isFinishing: boolean = false): string | undefined {
+    return this.coachingService.checkLateralThinking(this.getCurrentSessionThoughts(), this.branches, isFinishing);
   }
 
   /**
-   * PROACTIVE COACH (v2.9.1) - Analyzes thought content and recommends strategic lenses
-   * Returns coaching advice based on detected patterns
+   * PROACTIVE COACH - Analyzes thought content and recommends strategic lenses
+   * Delegates to CoachingService
    */
   private generateProactiveCoachAdvice(sessionThoughts: ThoughtRecord[]): string | undefined {
-    if (sessionThoughts.length === 0) return undefined;
-
-    const lastThought = sessionThoughts[sessionThoughts.length - 1];
-    const allContent = sessionThoughts.map(t => t.thought.toLowerCase()).join(' ');
-    const lastContent = lastThought.thought.toLowerCase();
-
-    // Check which extensions already exist in session
-    const existingExtensions = new Set<string>();
-    sessionThoughts.forEach(t => {
-      t.extensions?.forEach(e => existingExtensions.add(e.type));
-    });
-
-    // 1. OPTIMIZATION recommendation - detect TODO/FIXME/tech debt patterns
-    if (!existingExtensions.has('optimization')) {
-      const hasOptimizationTrigger = OPTIMIZATION_TRIGGERS.some(trigger => 
-        lastContent.includes(trigger) || allContent.includes(trigger)
-      );
-      if (hasOptimizationTrigger) {
-        return '🎯 COACH: Detected optimization opportunity (TODO/tech debt/performance mention). Consider using extend_thought with type "optimization" to analyze Before/After improvements.';
-      }
-    }
-
-    // 2. ASSUMPTION TESTING recommendation - detect uncertainty language
-    if (!existingExtensions.has('assumption_testing')) {
-      const uncertaintyCount = UNCERTAINTY_TRIGGERS.filter(trigger => 
-        lastContent.includes(trigger)
-      ).length;
-      if (uncertaintyCount >= 2) {
-        return '🎯 COACH: Detected uncertain language ("maybe", "probably", "I think"). Consider using extend_thought with type "assumption_testing" to validate your hypotheses.';
-      }
-    }
-
-    // 3. POLISH recommendation - high confidence near end of session
-    if (!existingExtensions.has('polish')) {
-      const isNearEnd = lastThought.thoughtNumber >= lastThought.totalThoughts - 1;
-      const hasHighConfidence = lastThought.confidence && lastThought.confidence >= POLISH_THRESHOLD_CONFIDENCE;
-      if (isNearEnd && hasHighConfidence) {
-        return '🎯 COACH: You\'re near completion with high confidence. Consider using extend_thought with type "polish" to check edge cases, typing, and documentation before finalizing.';
-      }
-    }
-
-    // 4. INNOVATION recommendation - long session without innovation
-    if (!existingExtensions.has('innovation') && sessionThoughts.length >= INNOVATION_THRESHOLD_THOUGHTS) {
-      const hasBranches = sessionThoughts.some(t => t.branchFromThought !== undefined);
-      if (!hasBranches) {
-        return '🎯 COACH: Long session without exploring alternatives. Consider using extend_thought with type "innovation" to find new directions or "white spots" in your solution.';
-      }
-    }
-
-    return undefined;
+    return this.coachingService.generateProactiveCoachAdvice(sessionThoughts);
   }
 
   /**
-   * Add advice with cooldown - prevents spam of same advice (v3.2.0)
-   * Returns true if advice was added, false if on cooldown
+   * Add advice with cooldown - prevents spam of same advice
+   * Delegates to CoachingService
    */
   private addAdviceWithCooldown(advice: string, nudges: string[]): boolean {
-    // Extract advice key (first 30 chars) for comparison
-    const adviceKey = advice.substring(0, 30);
-    if (this.recentAdvices.includes(adviceKey)) {
-      return false; // On cooldown, skip this advice
-    }
-    nudges.push(advice);
-    this.recentAdvices.push(adviceKey);
-    // Keep only last N advices for cooldown tracking
-    if (this.recentAdvices.length > COACH_COOLDOWN_COUNT) {
-      this.recentAdvices.shift();
-    }
-    return true;
+    return this.coachingService.addAdviceWithCooldown(advice, nudges);
   }
 
   /**
-   * PROACTIVE NUDGES (v3.1.0) - Enhanced coaching based on current thought
-   * Checks: short thoughts, low confidence, missing critiques
-   * v3.2.0: Added cooldown to prevent advice spam
+   * PROACTIVE NUDGES - Enhanced coaching based on current thought
+   * Delegates to CoachingService
    */
   private generateProactiveNudges(input: ThoughtInput): string | undefined {
-    const nudges: string[] = [];
-
-    // 1. Short thought detection
-    if (input.thought.length < MIN_THOUGHT_LENGTH && input.nextThoughtNeeded) {
-      this.addAdviceWithCooldown(
-        `⚠️ SHORT THOUGHT: Only ${input.thought.length} chars. Expand with implementation details or potential risks.`,
-        nudges
-      );
-    }
-
-    // 2. Low confidence nudge
-    if (input.confidence && input.confidence < LOW_CONFIDENCE_THRESHOLD) {
-      this.addAdviceWithCooldown(
-        `💡 LOW CONFIDENCE (${input.confidence}/10): Consider using quickExtension with type "critique" or "assumption_testing" to explore why you're uncertain.`,
-        nudges
-      );
-    }
-
-    // 3. Missing critique check (after N thoughts without any critique)
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    if (sessionThoughts.length >= NO_CRITIQUE_THRESHOLD) {
-      const hasCritique = sessionThoughts.some(t => 
-        t.extensions?.some(e => e.type === 'critique')
-      );
-      if (!hasCritique) {
-        this.addAdviceWithCooldown(
-          `🧐 NO SELF-CRITIQUE: ${sessionThoughts.length} thoughts without challenging your assumptions. Use quickExtension: {type: "critique", content: "..."} to validate your approach.`,
-          nudges
-        );
-      }
-    }
-
-    // 4. Smart pruning reminder (v3.2.0) - when session gets long
-    if (sessionThoughts.length >= SMART_PRUNING_THRESHOLD) {
-      this.addAdviceWithCooldown(
-        `🧹 LONG SESSION (${sessionThoughts.length} thoughts): Context is being auto-pruned. Consider consolidate_and_verify soon.`,
-        nudges
-      );
-    }
-
-    // 5. Near-limit warning (v3.3.1) - warn if near totalThoughts with low confidence
-    if (input.thoughtNumber >= input.totalThoughts - 1 && 
-        input.confidence && input.confidence < NEAR_LIMIT_CONFIDENCE_THRESHOLD) {
-      this.addAdviceWithCooldown(
-        `⚠️ NEAR LIMIT: You're at thought ${input.thoughtNumber}/${input.totalThoughts} with low confidence (${input.confidence}/10). Consider increasing totalThoughts or using needsMoreThoughts: true.`,
-        nudges
-      );
-    }
-
-    return nudges.length > 0 ? nudges.join('\n') : undefined;
+    return this.coachingService.generateProactiveNudges(input, this.getCurrentSessionThoughts());
   }
 
   /**
@@ -847,90 +544,11 @@ export class ThinkingService {
   }
 
   /**
-   * PRE-CONSOLIDATION AUDIT (v2.9.2) - Quality gate before finishing session
-   * Checks: SubSteps completion, Depth Metric, Blocker Gate
-   * Returns audit warnings if issues found
+   * PRE-CONSOLIDATION AUDIT - Quality gate before finishing session
+   * Delegates to CoachingService
    */
   private performPreConsolidationAudit(): string | undefined {
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    if (sessionThoughts.length === 0) return undefined;
-
-    const auditWarnings: string[] = [];
-
-    // 1. SUBSTEPS COMPLETION CHECK
-    // Count all subSteps defined in session and warn if many were defined
-    const allSubSteps: { thoughtNum: number; steps: string[] }[] = [];
-    sessionThoughts.forEach(t => {
-      if (t.subSteps && t.subSteps.length > 0) {
-        allSubSteps.push({ thoughtNum: t.thoughtNumber, steps: t.subSteps });
-      }
-    });
-
-    if (allSubSteps.length > 0) {
-      const totalSteps = allSubSteps.reduce((sum, s) => sum + s.steps.length, 0);
-      const thoughtsWithSteps = allSubSteps.map(s => `#${s.thoughtNum}`).join(', ');
-      auditWarnings.push(
-        `📋 SUBSTEPS AUDIT: You defined ${totalSteps} sub-steps in thoughts ${thoughtsWithSteps}. Before finishing, verify all were addressed.`
-      );
-    }
-
-    // 2. DEPTH METRIC CHECK
-    // Calculate average thought length and compare to complexity threshold
-    const avgLength = sessionThoughts.reduce((sum, t) => sum + t.thought.length, 0) / sessionThoughts.length;
-    const thoughtCount = sessionThoughts.length;
-    
-    let requiredDepth: number;
-    let complexityLevel: string;
-    if (thoughtCount <= 5) {
-      requiredDepth = DEPTH_METRIC_SIMPLE;
-      complexityLevel = 'simple';
-    } else if (thoughtCount <= 10) {
-      requiredDepth = DEPTH_METRIC_MEDIUM;
-      complexityLevel = 'medium';
-    } else {
-      requiredDepth = DEPTH_METRIC_COMPLEX;
-      complexityLevel = 'complex';
-    }
-
-    if (avgLength < requiredDepth) {
-      auditWarnings.push(
-        `🔬 DEPTH AUDIT: Average thought length (${Math.round(avgLength)} chars) is below threshold for ${complexityLevel} tasks (${requiredDepth} chars). Consider adding 'elaboration' extensions for key thoughts.`
-      );
-    }
-
-    // 3. BLOCKER GATE CHECK
-    // Warn about unresolved blocker/high-impact critiques
-    const unresolvedBlockers: number[] = [];
-    sessionThoughts.forEach(t => {
-      if (t.extensions) {
-        const hasBlocker = t.extensions.some(e => 
-          e.impact === 'blocker' || (e.impact === 'high' && e.type === 'critique')
-        );
-        if (hasBlocker) {
-          // Check if revision exists
-          const hasRevision = sessionThoughts.some(
-            rev => rev.isRevision && rev.revisesThought === t.thoughtNumber
-          );
-          if (!hasRevision) {
-            unresolvedBlockers.push(t.thoughtNumber);
-          }
-        }
-      }
-    });
-
-    if (unresolvedBlockers.length > 0) {
-      auditWarnings.push(
-        `🛑 BLOCKER AUDIT: Thoughts #${unresolvedBlockers.join(', ')} have unresolved critical issues. Create revisions before calling consolidate_and_verify.`
-      );
-    }
-
-    // 4. FINAL RECOMMENDATION
-    if (auditWarnings.length > 0) {
-      auditWarnings.unshift('⚡ PRE-CONSOLIDATION AUDIT (finishing session):');
-      auditWarnings.push('💡 TIP: Address these items or call consolidate_and_verify to formally close the session.');
-    }
-
-    return auditWarnings.length > 0 ? auditWarnings.join('\n') : undefined;
+    return this.coachingService.performPreConsolidationAudit(this.getCurrentSessionThoughts());
   }
 
   /**
@@ -1003,366 +621,42 @@ export class ThinkingService {
 
   /**
    * Generate ASCII tree visualization of thought structure (current session only)
+   * Delegates to VisualizationService
    */
   private generateAsciiTree(): string {
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    if (sessionThoughts.length === 0) return '(empty)';
-
-    const lines: string[] = ['📊 Thought Tree:'];
-    const mainThoughts = sessionThoughts.filter(
-      (t) => !t.branchFromThought && !t.isRevision
+    return this.visualizationService.generateAsciiTree(
+      this.getCurrentSessionThoughts(),
+      this.branches
     );
-
-    for (const thought of mainThoughts) {
-      const conf = thought.confidence ? ` [${thought.confidence}]` : '';
-      const preview = thought.thought.substring(0, 40);
-      lines.push(`├── ${thought.thoughtNumber}${conf}: ${preview}...`);
-
-      // Show subSteps (fractal micro-plan)
-      if (thought.subSteps && thought.subSteps.length > 0) {
-        lines.push(`│   📋 Sub-steps:`);
-        thought.subSteps.forEach((step, idx) => {
-          lines.push(`│   ${idx === thought.subSteps!.length - 1 ? '└' : '├'}── ${step}`);
-        });
-      }
-
-      // Show alternatives (quick comparison)
-      if (thought.alternatives && thought.alternatives.length > 0) {
-        lines.push(`│   ⚖️ Alternatives: [${thought.alternatives.join(' | ')}]`);
-      }
-
-      // Show extensions for this thought (vertical thinking)
-      if (thought.extensions && thought.extensions.length > 0) {
-        for (const ext of thought.extensions) {
-          // Strategic Lens icons (v2.9.0)
-          const typeIcon = ext.type === 'innovation' ? '💡' 
-            : ext.type === 'optimization' ? '⚡' 
-            : ext.type === 'polish' ? '✨'
-            : ext.impact === 'blocker' ? '🚫' 
-            : ext.impact === 'high' ? '⚠️' 
-            : '📝';
-          lines.push(`│   └── ${typeIcon} [${ext.type.toUpperCase()}]: ${ext.content.substring(0, 30)}...`);
-        }
-      }
-
-      // Show revisions for this thought (from current session) with (R) indicator
-      const revisions = sessionThoughts.filter(
-        (t) => t.isRevision && t.revisesThought === thought.thoughtNumber
-      );
-      for (const rev of revisions) {
-        const revConf = rev.confidence ? ` [${rev.confidence}]` : '';
-        lines.push(`│   └── 🔄 (R${rev.thoughtNumber})${revConf}: ${rev.thought.substring(0, 25)}...`);
-      }
-
-      // Show branches from this thought
-      for (const [branchId, branchThoughts] of this.branches) {
-        const fromThis = branchThoughts.filter(
-          (t) => t.branchFromThought === thought.thoughtNumber
-        );
-        if (fromThis.length > 0) {
-          lines.push(`│   └── 🌿 [${branchId}]: ${fromThis.length} thought(s)`);
-        }
-      }
-    }
-
-    // Replace last ├── with └──
-    if (lines.length > 1) {
-      const lastIdx = lines.length - 1;
-      lines[lastIdx] = lines[lastIdx].replace('├──', '└──');
-    }
-
-    return lines.join('\n');
-  }
-
-  /**
-   * Sanitize text for safe Mermaid.js rendering
-   * Escapes special characters that could break diagram syntax
-   */
-  private sanitizeForMermaid(text: string): string {
-    return text
-      .replace(/"/g, "'")
-      .replace(/\[/g, '(')
-      .replace(/\]/g, ')')
-      .replace(/\{/g, '(')
-      .replace(/\}/g, ')')
-      .replace(/-->/g, '->')
-      .replace(/---/g, '--')
-      .replace(/</g, '‹')
-      .replace(/>/g, '›')
-      .replace(/\|/g, '¦');
   }
 
   /**
    * Generate Mermaid.js graph visualization (current session only)
-   * Uses subgraphs for branches and visual intelligence for blockers/revised
+   * Delegates to VisualizationService
    */
   private generateMermaid(): string {
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    if (sessionThoughts.length === 0) return '';
-
-    const lines: string[] = ['graph TD;'];
-    const mainThoughts = sessionThoughts.filter(
-      (t) => !t.branchFromThought && !t.isRevision
+    return this.visualizationService.generateMermaid(
+      this.getCurrentSessionThoughts(),
+      this.branches,
+      this.thoughtHistory,
+      this.getCurrentSessionStartIndex()
     );
-
-    // Build set of revised thoughts (thoughts that have been superseded)
-    const revisedThoughts = new Set(
-      sessionThoughts
-        .filter((t) => t.isRevision && t.revisesThought)
-        .map((t) => t.revisesThought!)
-    );
-
-    // Build set of thoughts with blocker extensions
-    const blockerThoughts = new Set(
-      sessionThoughts
-        .filter((t) => t.extensions?.some((e) => e.impact === 'blocker'))
-        .map((t) => t.thoughtNumber)
-    );
-
-    // Main flow subgraph
-    lines.push('  subgraph MainFlow["🧠 Main Reasoning"]');
-
-    // Add start node
-    if (mainThoughts.length > 0) {
-      lines.push(`    start((Start)) --> ${mainThoughts[0].thoughtNumber};`);
-    }
-
-    // Process each main thought
-    for (let i = 0; i < mainThoughts.length; i++) {
-      const t = mainThoughts[i];
-      const label = this.sanitizeForMermaid(t.thought.substring(0, 25));
-      const confLabel = t.confidence ? `<br/>conf:${t.confidence}` : '';
-      // Show subSteps count in Mermaid (keep graph clean, details in ASCII)
-      const subStepsLabel = t.subSteps && t.subSteps.length > 0 ? `<br/>📋${t.subSteps.length} steps` : '';
-      const altsLabel = t.alternatives && t.alternatives.length > 0 ? `<br/>⚖️${t.alternatives.length} alts` : '';
-
-      // Determine style class with priority: blocker > revised > lowConf > highConf > normal
-      let styleClass = 'normal';
-      if (blockerThoughts.has(t.thoughtNumber)) {
-        styleClass = 'blocker';
-      } else if (revisedThoughts.has(t.thoughtNumber)) {
-        styleClass = 'revised';
-      } else if (t.confidence && t.confidence < 5) {
-        styleClass = 'lowConf';
-      } else if (t.confidence && t.confidence >= 8) {
-        styleClass = 'highConf'; // Gold border for high confidence thoughts
-      }
-
-      lines.push(`    ${t.thoughtNumber}["#${t.thoughtNumber}: ${label}...${confLabel}${subStepsLabel}${altsLabel}"]:::${styleClass};`);
-
-      // Edge to next thought
-      if (i < mainThoughts.length - 1) {
-        lines.push(`    ${t.thoughtNumber} --> ${mainThoughts[i + 1].thoughtNumber};`);
-      }
-    }
-    lines.push('  end');
-
-    // Extensions subgraph (if any)
-    const hasExtensions = mainThoughts.some((t) => t.extensions && t.extensions.length > 0);
-    if (hasExtensions) {
-      lines.push('  subgraph Extensions["🔍 Deep Analysis"]');
-      for (const t of mainThoughts) {
-        if (t.extensions && t.extensions.length > 0) {
-          t.extensions.forEach((ext, idx) => {
-            const extId = `ext_${t.thoughtNumber}_${idx}`;
-            const extLabel = this.sanitizeForMermaid(ext.content.substring(0, 20));
-            const extClass = ext.impact === 'blocker' ? 'blocker' : ext.impact === 'high' ? 'highImpact' : 'ext';
-            const icon = ext.impact === 'blocker' ? '🚫' : ext.impact === 'high' ? '⚠️' : '📝';
-            lines.push(`    ${extId}[/"${icon} ${ext.type}: ${extLabel}..."/]:::${extClass};`);
-          });
-        }
-      }
-      lines.push('  end');
-      // Connect extensions to main thoughts
-      for (const t of mainThoughts) {
-        if (t.extensions && t.extensions.length > 0) {
-          t.extensions.forEach((_, idx) => {
-            const extId = `ext_${t.thoughtNumber}_${idx}`;
-            lines.push(`  ${t.thoughtNumber} -.-> ${extId};`);
-          });
-        }
-      }
-    }
-
-    // Revisions subgraph (if any)
-    const revisions = sessionThoughts.filter((t) => t.isRevision);
-    if (revisions.length > 0) {
-      lines.push('  subgraph Revisions["🔄 Revisions"]');
-      revisions.forEach((rev, idx) => {
-        const revId = `rev_${rev.revisesThought}_${idx}`;
-        const revLabel = this.sanitizeForMermaid(rev.thought.substring(0, 20));
-        lines.push(`    ${revId}["🔄 ${revLabel}..."]:::revision;`);
-      });
-      lines.push('  end');
-      // Connect revisions to targets
-      revisions.forEach((rev, idx) => {
-        const revId = `rev_${rev.revisesThought}_${idx}`;
-        lines.push(`  ${revId} ==> ${rev.revisesThought};`);
-      });
-    }
-
-    // Branch subgraphs
-    for (const [branchId, branchThoughts] of this.branches) {
-      const sessionBranchThoughts = branchThoughts.filter((bt) => {
-        const sessionStart = this.getCurrentSessionStartIndex();
-        return this.thoughtHistory.indexOf(bt) >= sessionStart;
-      });
-
-      if (sessionBranchThoughts.length > 0) {
-        lines.push(`  subgraph Branch_${branchId}["🌿 Branch: ${branchId}"]`);
-        sessionBranchThoughts.forEach((bt, idx) => {
-          const branchNodeId = `branch_${branchId}_${idx}`;
-          const btLabel = this.sanitizeForMermaid(bt.thought.substring(0, 20));
-          lines.push(`    ${branchNodeId}["${btLabel}..."]:::branch;`);
-        });
-        lines.push('  end');
-        // Connect branches to source thoughts
-        sessionBranchThoughts.forEach((bt, idx) => {
-          if (bt.branchFromThought) {
-            const branchNodeId = `branch_${branchId}_${idx}`;
-            lines.push(`  ${bt.branchFromThought} -.->|${branchId}| ${branchNodeId};`);
-          }
-        });
-      }
-    }
-
-    // Style definitions with visual intelligence
-    lines.push('  classDef normal fill:#e1f5fe,stroke:#01579b;');
-    lines.push('  classDef highConf fill:#e1f5fe,stroke:#ffd700,stroke-width:3px;'); // Gold border for high confidence
-    lines.push('  classDef lowConf fill:#ffecb3,stroke:#ff6f00;');
-    lines.push('  classDef blocker fill:#ffcdd2,stroke:#b71c1c,stroke-width:3px;');
-    lines.push('  classDef revised fill:#e0e0e0,stroke:#9e9e9e,stroke-dasharray:5 5;');
-    lines.push('  classDef highImpact fill:#fff3e0,stroke:#e65100;');
-    lines.push('  classDef ext fill:#f3e5f5,stroke:#7b1fa2;');
-    lines.push('  classDef revision fill:#e8f5e9,stroke:#2e7d32;');
-    lines.push('  classDef branch fill:#e0f2f1,stroke:#00695c;');
-
-    return lines.join('\n');
-  }
-
-  /**
-   * Normalize text for stagnation comparison
-   * Removes common filler phrases and extra whitespace
-   */
-  private normalizeForComparison(text: string): string {
-    let normalized = text.toLowerCase();
-    for (const phrase of FILLER_PHRASES) {
-      normalized = normalized.replace(new RegExp(phrase, 'gi'), '');
-    }
-    return normalized.replace(/\s+/g, ' ').trim();
-  }
-
-  /**
-   * Calculate word entropy (diversity) of text
-   * Returns 0-1, higher = more diverse vocabulary
-   * Includes technical short terms (api, db, etc.) that would otherwise be filtered
-   */
-  private calculateWordEntropy(text: string): number {
-    const words = text.toLowerCase().split(/\s+/).filter((w) => 
-      w.length > 2 || TECHNICAL_SHORT_TERMS.has(w)
-    );
-    if (words.length === 0) return 0;
-    const uniqueWords = new Set(words);
-    return uniqueWords.size / words.length;
   }
 
   /**
    * Detect stagnation - repeated similar thoughts with improved detection
-   * Uses normalization and entropy analysis
+   * Delegates to StagnationService
    */
   private detectStagnation(newThought: string): string | undefined {
-    if (this.thoughtHistory.length < STAGNATION_CHECK_COUNT) return undefined;
-
-    const recent = this.thoughtHistory.slice(-STAGNATION_CHECK_COUNT);
-    
-    // Jaccard similarity check - more accurate than substring comparison
-    const similarities = recent.map((t) => this.calculateJaccardSimilarity(newThought, t.thought));
-    const avgSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
-    const allHighlySimilar = similarities.every((s) => s >= JACCARD_STAGNATION_THRESHOLD);
-
-    if (allHighlySimilar && newThought.trim().length > 20) {
-      return `🛑 STAGNATION DETECTED: Your last ${STAGNATION_CHECK_COUNT} thoughts are ${Math.round(avgSimilarity * 100)}% similar (Jaccard). FORCE yourself to try a DIFFERENT approach or use 'extend_thought' with 'critique' to analyze why you're stuck.`;
-    }
-
-    // Entropy check - detect low vocabulary diversity
-    const newEntropy = this.calculateWordEntropy(newThought);
-    const avgRecentEntropy = recent.reduce((sum, t) => sum + this.calculateWordEntropy(t.thought), 0) / recent.length;
-
-    if (newEntropy < MIN_ENTROPY_THRESHOLD && avgRecentEntropy < MIN_ENTROPY_THRESHOLD) {
-      return `🛑 LOW ENTROPY DETECTED: Your thoughts lack vocabulary diversity (entropy: ${newEntropy.toFixed(2)}). Try expressing your reasoning with different words or explore a completely new angle.`;
-    }
-
-    // Check for declining confidence
-    const recentWithConf = recent.filter((t) => t.confidence !== undefined);
-    if (recentWithConf.length >= 3) {
-      const isDecreasing = recentWithConf.every((t, i) => {
-        if (i === 0) return true;
-        return (t.confidence ?? 10) <= (recentWithConf[i - 1].confidence ?? 10);
-      });
-      const avgRecent = recentWithConf.reduce((sum, t) => sum + (t.confidence ?? 0), 0) / recentWithConf.length;
-
-      if (isDecreasing && avgRecent < 5) {
-        return `⚠️ CONFIDENCE DECLINING: Average confidence dropped to ${avgRecent.toFixed(1)}. Consider using 'extend_thought' to critique your approach.`;
-      }
-    }
-
-    return undefined;
+    return this.stagnationService.detectStagnation(newThought, this.thoughtHistory);
   }
 
   /**
    * Validate path connectivity - ensure thoughts in winningPath are logically connected
-   * Each thought must be reachable from its predecessor via sequence, branch, or revision
+   * Delegates to ValidationService
    */
   private validatePathConnectivity(winningPath: number[]): PathConnectivityResult {
-    if (winningPath.length <= 1) return { valid: true };
-
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    const thoughtMap = new Map(sessionThoughts.map((t) => [t.thoughtNumber, t]));
-
-    for (let i = 1; i < winningPath.length; i++) {
-      const current = winningPath[i];
-      const previous = winningPath[i - 1];
-      const currentThought = thoughtMap.get(current);
-
-      if (!currentThought) {
-        return { valid: false, error: `Thought #${current} not found`, disconnectedAt: current };
-      }
-
-      // Build set of valid predecessors for current thought
-      const validPredecessors = new Set<number>();
-
-      // Sequential predecessor (N can follow N-1)
-      validPredecessors.add(current - 1);
-
-      // Branch source (if this thought branches from another)
-      if (currentThought.branchFromThought) {
-        validPredecessors.add(currentThought.branchFromThought);
-      }
-
-      // Revision target (revision can follow the thought it revises)
-      if (currentThought.isRevision && currentThought.revisesThought) {
-        validPredecessors.add(currentThought.revisesThought);
-        // Also allow revision to follow the thought BEFORE the one it revises
-        validPredecessors.add(currentThought.revisesThought - 1);
-      }
-
-      // Special case: if previous thought was revised, current can follow the revision
-      const previousThought = thoughtMap.get(previous);
-      if (previousThought?.isRevision && previousThought.revisesThought) {
-        // Allow next sequential after revision target
-        validPredecessors.add(previousThought.revisesThought + 1);
-      }
-
-      if (!validPredecessors.has(previous)) {
-        return {
-          valid: false,
-          error: `Path discontinuity: #${current} cannot logically follow #${previous}. Valid predecessors for #${current}: [${Array.from(validPredecessors).sort((a, b) => a - b).join(', ')}]`,
-          disconnectedAt: current,
-        };
-      }
-    }
-
-    return { valid: true };
+    return this.validationService.validatePathConnectivity(winningPath, this.getCurrentSessionThoughts());
   }
 
   /**
@@ -1595,7 +889,7 @@ export class ThinkingService {
     this.lastThoughtNumber = 0;
     this.sessionGoal = undefined; // Clear goal on reset (v2.10.0)
     this.currentSessionId = ''; // Clear sessionId on reset (v2.11.0)
-    this.recentAdvices = []; // Clear coach cooldown (v3.2.0)
+    this.coachingService.reset(); // Clear coach cooldown (v3.2.0)
     this.deadEnds = []; // Clear dead ends (v3.3.0)
   }
 
@@ -1619,200 +913,24 @@ export class ThinkingService {
 
   /**
    * Consolidate and verify the thinking process (meta-cognitive audit)
-   * Forces model to synthesize, cross-check, and find contradictions
-   * Works only with current session thoughts
+   * Delegates to ConsolidateService
    */
   consolidate(input: import('../types/thought.types.js').ConsolidateInput): import('../types/thought.types.js').ConsolidateResult {
-    const { winningPath, verdict } = input;
-    const warnings: string[] = [];
-
-    // Get current session thoughts only
-    const sessionThoughts = this.getCurrentSessionThoughts();
-
-    // Validate: must have thoughts to consolidate
-    if (sessionThoughts.length === 0) {
-      return {
-        status: 'error',
-        evaluation: 'Cannot consolidate empty thought history.',
-        warnings: [],
-        canProceedToFinalAnswer: false,
-        pathAnalysis: {
-          totalThoughts: 0,
-          pathLength: 0,
-          ignoredRatio: 0,
-          lowConfidenceInPath: [],
-          unaddressedBlockers: [],
-          unaddressedCritical: [],
-        },
-        errorMessage: 'No thoughts recorded. Use sequentialthinking first.',
-      };
-    }
-
-    // Validate: winning path must reference existing thoughts in current session
-    const existingNumbers = new Set(sessionThoughts.map((t) => t.thoughtNumber));
-    const invalidRefs = winningPath.filter((n) => !existingNumbers.has(n));
-    if (invalidRefs.length > 0) {
-      return {
-        status: 'error',
-        evaluation: `Invalid thought references in winning path: ${invalidRefs.join(', ')}`,
-        warnings: [],
-        canProceedToFinalAnswer: false,
-        pathAnalysis: {
-          totalThoughts: sessionThoughts.length,
-          pathLength: winningPath.length,
-          ignoredRatio: 0,
-          lowConfidenceInPath: [],
-          unaddressedBlockers: [],
-          unaddressedCritical: [],
-        },
-        errorMessage: `Thoughts ${invalidRefs.join(', ')} do not exist in current session.`,
-      };
-    }
-
-    // Validate: path connectivity - thoughts must be logically connected
-    const connectivityCheck = this.validatePathConnectivity(winningPath);
-    if (!connectivityCheck.valid) {
-      warnings.push(`🚫 PATH DISCONTINUITY: ${connectivityCheck.error}`);
-    }
-
-    // Find low-confidence thoughts in winning path (current session only)
-    const lowConfidenceInPath = sessionThoughts
-      .filter((t) => winningPath.includes(t.thoughtNumber))
-      .filter((t) => t.confidence !== undefined && t.confidence < 5)
-      .map((t) => t.thoughtNumber);
-
-    if (lowConfidenceInPath.length > 0) {
-      warnings.push(
-        `⚠️ LOW CONFIDENCE: Your winning path includes thoughts with confidence < 5: #${lowConfidenceInPath.join(', ')}. Are you sure about these steps?`
-      );
-    }
-
-    // Check ignored thoughts ratio (current session only)
-    const ignoredRatio = 1 - winningPath.length / sessionThoughts.length;
-    if (ignoredRatio > 0.6) {
-      warnings.push(
-        `⚠️ HIGH DISCARD RATE: You are ignoring ${Math.round(ignoredRatio * 100)}% of your thoughts. Ensure you haven't missed important contradictions in discarded branches.`
-      );
-    }
-
-    // Find unaddressed BLOCKER extensions (current session only)
-    const unaddressedBlockers: number[] = [];
-    // Find unaddressed HIGH impact critique extensions (current session only)
-    const unaddressedCritical: number[] = [];
-
-    for (const thought of sessionThoughts) {
-      if (thought.extensions) {
-        // Check for BLOCKER impact
-        const hasBlocker = thought.extensions.some((e) => e.impact === 'blocker');
-        // Check for HIGH impact CRITIQUE specifically
-        const hasHighCritique = thought.extensions.some(
-          (e) => e.impact === 'high' && e.type === 'critique'
-        );
-
-        if (winningPath.includes(thought.thoughtNumber)) {
-          // Check if there's a revision addressing this thought in current session
-          const hasRevision = sessionThoughts.some(
-            (t) => t.isRevision && t.revisesThought === thought.thoughtNumber
-          );
-
-          if (hasBlocker && !hasRevision) {
-            unaddressedBlockers.push(thought.thoughtNumber);
-          }
-          if (hasHighCritique && !hasRevision) {
-            unaddressedCritical.push(thought.thoughtNumber);
-          }
-        }
+    return this.consolidateService.consolidate(
+      input,
+      this.getCurrentSessionThoughts(),
+      (path, reason) => this.recordDeadEnd(path, reason),
+      // v4.1.0: Save insight on successful consolidation
+      (path, summary) => {
+        this.insightsService.saveWinningPath({
+          path,
+          summary,
+          goal: this.sessionGoal,
+          avgConfidence: this.calculateAverageConfidence(),
+          sessionLength: this.getCurrentSessionThoughts().length,
+        }).catch(err => console.error('Failed to save insight:', err));
       }
-    }
-
-    if (unaddressedBlockers.length > 0) {
-      warnings.push(
-        `🚫 UNADDRESSED BLOCKERS: Thoughts #${unaddressedBlockers.join(', ')} have BLOCKER extensions but no revisions. You MUST address these before proceeding.`
-      );
-    }
-
-    if (unaddressedCritical.length > 0) {
-      warnings.push(
-        `⚠️ UNADDRESSED CRITICAL: Thoughts #${unaddressedCritical.join(', ')} have HIGH impact critiques but no revisions. Address these issues with isRevision: true.`
-      );
-    }
-
-    // CRITICAL: Check for missing revisions in winningPath
-    // If thought X in path has critical extension AND revision exists, revision MUST be in path too
-    const missingRevisions: number[] = [];
-    for (const thought of sessionThoughts) {
-      if (!winningPath.includes(thought.thoughtNumber)) continue;
-      if (!thought.extensions) continue;
-
-      const hasCritical = thought.extensions.some(
-        (e) => (e.impact === 'high' || e.impact === 'blocker') && e.type === 'critique'
-      );
-      if (!hasCritical) continue;
-
-      // Find revision for this thought
-      const revision = sessionThoughts.find(
-        (t) => t.isRevision && t.revisesThought === thought.thoughtNumber
-      );
-      if (revision && !winningPath.includes(revision.thoughtNumber)) {
-        missingRevisions.push(thought.thoughtNumber);
-      }
-    }
-
-    if (missingRevisions.length > 0) {
-      warnings.push(
-        `🚫 MISSING REVISIONS IN PATH: Thoughts #${missingRevisions.join(', ')} have critical critiques with revisions, but those revisions are NOT in your winningPath. Include the revision thoughts or remove the flawed originals.`
-      );
-    }
-
-    // Check for empty or too short winning path
-    if (winningPath.length === 0) {
-      warnings.push('⚠️ EMPTY PATH: No thoughts selected in winning path. This seems wrong.');
-    } else if (winningPath.length < 2 && sessionThoughts.length > 3) {
-      warnings.push(
-        '⚠️ SUSPICIOUSLY SHORT PATH: Only 1 thought selected from a longer chain. Did you skip important reasoning?'
-      );
-    }
-
-    // Determine if can proceed - STRICT MODE: block on blockers, critical issues, missing revisions, or path discontinuity
-    const hasBlockerWarnings = unaddressedBlockers.length > 0;
-    const hasCriticalWarnings = unaddressedCritical.length > 0;
-    const hasMissingRevisions = missingRevisions.length > 0;
-    const hasPathDiscontinuity = !connectivityCheck.valid;
-    const canProceed = verdict === 'ready' && !hasBlockerWarnings && !hasCriticalWarnings && !hasMissingRevisions && !hasPathDiscontinuity && warnings.length <= 1;
-
-    // Generate evaluation message
-    let evaluation: string;
-    if (canProceed) {
-      evaluation = '✅ SYNTHESIS ACCEPTED: Your reasoning chain is coherent. You may proceed to final answer.';
-    } else if (verdict === 'needs_more_work') {
-      evaluation = '🔄 ACKNOWLEDGED: You identified this needs more work. Continue with sequentialthinking or extend_thought.';
-      
-      // v3.3.0: Record this path as a dead end
-      this.recordDeadEnd(winningPath, input.summary);
-    } else {
-      evaluation = `⚠️ SYNTHESIS REJECTED: ${warnings.length} issue(s) found. Address them before providing final answer.`;
-    }
-
-    // Log consolidation
-    console.error(
-      `🎯 Consolidation: verdict=${verdict}, path=[${winningPath.join(',')}], warnings=${warnings.length}, canProceed=${canProceed}`
     );
-
-    return {
-      status: 'success',
-      evaluation,
-      warnings,
-      canProceedToFinalAnswer: canProceed,
-      pathAnalysis: {
-        totalThoughts: sessionThoughts.length,
-        pathLength: winningPath.length,
-        ignoredRatio: Math.round(ignoredRatio * 100) / 100,
-        lowConfidenceInPath,
-        unaddressedBlockers,
-        unaddressedCritical,
-        disconnectedAt: connectivityCheck.disconnectedAt ? [connectivityCheck.disconnectedAt] : undefined,
-      },
-    };
   }
 
   /**
@@ -1833,108 +951,20 @@ export class ThinkingService {
 
   /**
    * Export current session as Markdown report (v2.10.0)
-   * Use after consolidate_and_verify to save session results
+   * Delegates to ExportService
    */
   exportSession(options: { format?: 'markdown' | 'json'; includeMermaid?: boolean } = {}): string {
-    const { format = 'markdown', includeMermaid = true } = options;
-    const session = this.getCurrentSessionThoughts();
-
-    if (session.length === 0) {
-      return format === 'json'
-        ? JSON.stringify({ error: 'No thoughts recorded in current session' })
-        : '# Think Session Report\n\n*No thoughts recorded in current session.*';
-    }
-
-    if (format === 'json') {
-      return JSON.stringify(
-        {
-          goal: this.sessionGoal,
-          thoughts: session,
-          branches: Array.from(this.branches.entries()),
-          deadEnds: this.getDeadEnds(), // v3.3.0
-          averageConfidence: this.calculateAverageConfidence(),
-          exportedAt: new Date().toISOString(),
-        },
-        null,
-        2
-      );
-    }
-
-    // Markdown format
-    const sections: string[] = [
-      '# Think Session Report',
-      `**Date:** ${new Date().toISOString().split('T')[0]}`,
-      '',
-    ];
-
-    // Goal section
-    if (this.sessionGoal) {
-      sections.push(`## 🎯 Goal`, this.sessionGoal, '');
-    }
-
-    // Summary section
-    const currentDeadEnds = this.getDeadEnds();
-    sections.push(
-      '## 📊 Summary',
-      `- **Total thoughts:** ${session.length}`,
-      `- **Branches:** ${this.branches.size}`,
-      `- **Dead ends:** ${currentDeadEnds.length}`,
-      `- **Average confidence:** ${this.calculateAverageConfidence() ?? 'N/A'}`,
-      ''
+    return this.exportService.export(
+      {
+        thoughts: this.getCurrentSessionThoughts(),
+        branches: this.branches,
+        deadEnds: this.getDeadEnds(),
+        sessionGoal: this.sessionGoal,
+        averageConfidence: this.calculateAverageConfidence(),
+        mermaidDiagram: this.generateMermaid(),
+      },
+      options
     );
-
-    // Thoughts section
-    sections.push('## 💭 Thoughts', '');
-    session.forEach((t) => {
-      const confStr = t.confidence ? ` [confidence: ${t.confidence}/10]` : '';
-      const revStr = t.isRevision ? ` *(revision of #${t.revisesThought})*` : '';
-      const branchStr = t.branchFromThought ? ` *(branch from #${t.branchFromThought})*` : '';
-
-      sections.push(`### Thought #${t.thoughtNumber}${confStr}${revStr}${branchStr}`);
-      sections.push(t.thought);
-
-      if (t.subSteps && t.subSteps.length > 0) {
-        sections.push('', '**Sub-steps:**');
-        t.subSteps.forEach((s) => sections.push(`- ${s}`));
-      }
-
-      if (t.alternatives && t.alternatives.length > 0) {
-        sections.push('', `**Alternatives considered:** ${t.alternatives.join(' | ')}`);
-      }
-
-      if (t.extensions && t.extensions.length > 0) {
-        sections.push('', '**Extensions:**');
-        t.extensions.forEach((e) => {
-          const icon =
-            e.type === 'innovation' ? '💡' : e.type === 'optimization' ? '⚡' : e.type === 'polish' ? '✨' : '📝';
-          sections.push(`- ${icon} **[${e.type.toUpperCase()}]** (${e.impact}): ${e.content}`);
-        });
-      }
-
-      sections.push('');
-    });
-
-    // Dead Ends section (v3.3.0)
-    if (currentDeadEnds.length > 0) {
-      sections.push('## 💀 Dead Ends (Rejected Paths)', '');
-      currentDeadEnds.forEach((de, idx) => {
-        sections.push(`### Dead End #${idx + 1}`);
-        sections.push(`- **Path:** [${de.path.join(' → ')}]`);
-        sections.push(`- **Reason:** ${de.reason}`);
-        sections.push(`- **Recorded:** ${de.timestamp}`);
-        sections.push('');
-      });
-    }
-
-    // Mermaid diagram
-    if (includeMermaid) {
-      const mermaid = this.generateMermaid();
-      if (mermaid) {
-        sections.push('## 🔀 Diagram', '', '```mermaid', mermaid, '```', '');
-      }
-    }
-
-    return sections.join('\n');
   }
 
   // ============================================
@@ -1943,271 +973,37 @@ export class ThinkingService {
 
   /**
    * SUBMIT THINKING SESSION (v4.0.0) - Burst Thinking
-   * Accepts a complete thinking session in one call for atomic validation
-   * Reduces round-trips from N to 1 for complex reasoning chains
+   * Delegates validation to BurstService, commits results to state
    */
-  submitSession(input: import('../types/thought.types.js').SubmitSessionInput): import('../types/thought.types.js').SubmitSessionResult {
+  submitSession(input: SubmitSessionInput): SubmitSessionResult {
     const { goal, thoughts, consolidation } = input;
-    const errors: string[] = [];
-    const warnings: string[] = [];
 
-    // Import limits from types
-    const BURST_LIMITS = {
-      maxThoughts: 30,
-      minThoughts: 1,
-      maxThoughtLength: 1000,
-      minThoughtLength: 50,
-      maxStagnationScore: 0.6,
-      minAvgEntropy: 0.25,
-      minAvgConfidence: 4,
-    };
+    // Validate using BurstService
+    const validation = this.burstService.validate(goal, thoughts, consolidation);
 
-    // === PHASE 1: Basic Validation ===
-    
-    // Validate goal
-    if (!goal || goal.trim().length < 10) {
-      errors.push('Goal is required and must be at least 10 characters');
-    }
-
-    // Validate thoughts array
-    if (!thoughts || thoughts.length === 0) {
-      errors.push('At least 1 thought is required');
-    } else if (thoughts.length > BURST_LIMITS.maxThoughts) {
-      errors.push(`Too many thoughts: ${thoughts.length} > ${BURST_LIMITS.maxThoughts} max`);
-    }
-
-    // Early exit if basic validation fails
-    if (errors.length > 0) {
+    if (!validation.passed || !validation.sortedThoughts) {
+      console.error(`🚫 Burst session REJECTED: ${validation.errors.length} errors`);
       return {
         status: 'rejected',
         sessionId: '',
         thoughtsProcessed: 0,
-        validation: { passed: false, errors, warnings },
-        metrics: { avgConfidence: 0, avgEntropy: 0, avgLength: 0, stagnationScore: 0, thoughtCount: 0 },
-        errorMessage: errors.join('; '),
+        validation: { passed: false, errors: validation.errors, warnings: validation.warnings },
+        metrics: validation.metrics,
+        errorMessage: validation.errors.join('; '),
       };
     }
 
-    // === PHASE 2: Sequence Validation ===
-    
-    // Check thought numbers are sequential
-    const sortedThoughts = [...thoughts].sort((a, b) => a.thoughtNumber - b.thoughtNumber);
-    for (let i = 0; i < sortedThoughts.length; i++) {
-      const expected = i + 1;
-      const actual = sortedThoughts[i].thoughtNumber;
-      if (actual !== expected && !sortedThoughts[i].isRevision) {
-        errors.push(`Sequence break: expected thought #${expected}, got #${actual}`);
-        break;
-      }
-    }
-
-    // Check for duplicate thought numbers (excluding revisions)
-    const nonRevisionNumbers = thoughts.filter(t => !t.isRevision).map(t => t.thoughtNumber);
-    const duplicates = nonRevisionNumbers.filter((n, i) => nonRevisionNumbers.indexOf(n) !== i);
-    if (duplicates.length > 0) {
-      errors.push(`Duplicate thought numbers: ${[...new Set(duplicates)].join(', ')}`);
-    }
-
-    // === PHASE 3: Content Quality Validation ===
-    
-    let totalLength = 0;
-    let totalEntropy = 0;
-    let totalConfidence = 0;
-    let confidenceCount = 0;
-
-    for (const t of thoughts) {
-      // Min length check
-      if (t.thought.length < BURST_LIMITS.minThoughtLength) {
-        errors.push(`Thought #${t.thoughtNumber} too short: ${t.thought.length} < ${BURST_LIMITS.minThoughtLength} chars`);
-      }
-      // Max length check
-      if (t.thought.length > BURST_LIMITS.maxThoughtLength) {
-        warnings.push(`Thought #${t.thoughtNumber} truncated: ${t.thought.length} > ${BURST_LIMITS.maxThoughtLength} chars`);
-      }
-
-      totalLength += Math.min(t.thought.length, BURST_LIMITS.maxThoughtLength);
-      totalEntropy += this.calculateWordEntropy(t.thought);
-      
-      if (t.confidence !== undefined) {
-        totalConfidence += t.confidence;
-        confidenceCount++;
-      }
-
-      // Validate revision targets
-      if (t.isRevision && t.revisesThought !== undefined) {
-        const targetExists = thoughts.some(other => other.thoughtNumber === t.revisesThought);
-        if (!targetExists) {
-          errors.push(`Revision #${t.thoughtNumber} targets non-existent thought #${t.revisesThought}`);
-        }
-      }
-
-      // Validate branch sources
-      if (t.branchFromThought !== undefined) {
-        const sourceExists = thoughts.some(other => other.thoughtNumber === t.branchFromThought);
-        if (!sourceExists) {
-          errors.push(`Branch in thought #${t.thoughtNumber} from non-existent thought #${t.branchFromThought}`);
-        }
-      }
-    }
-
-    // === PHASE 4: Stagnation Detection ===
-    
-    let stagnationScore = 0;
-    if (thoughts.length >= 2) {
-      let totalSimilarity = 0;
-      let comparisons = 0;
-      
-      for (let i = 1; i < thoughts.length; i++) {
-        const similarity = this.calculateJaccardSimilarity(
-          thoughts[i].thought,
-          thoughts[i - 1].thought
-        );
-        totalSimilarity += similarity;
-        comparisons++;
-      }
-      
-      stagnationScore = comparisons > 0 ? totalSimilarity / comparisons : 0;
-      
-      if (stagnationScore > BURST_LIMITS.maxStagnationScore) {
-        errors.push(`Stagnation detected: ${(stagnationScore * 100).toFixed(0)}% avg similarity > ${BURST_LIMITS.maxStagnationScore * 100}% threshold`);
-      }
-    }
-
-    // === PHASE 5: Calculate Metrics ===
-    
-    const avgLength = thoughts.length > 0 ? totalLength / thoughts.length : 0;
-    const avgEntropy = thoughts.length > 0 ? totalEntropy / thoughts.length : 0;
-    const avgConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
-
-    // Entropy check
-    if (avgEntropy < BURST_LIMITS.minAvgEntropy && thoughts.length > 2) {
-      warnings.push(`Low vocabulary diversity: ${avgEntropy.toFixed(2)} < ${BURST_LIMITS.minAvgEntropy} threshold`);
-    }
-
-    // Confidence check
-    if (avgConfidence < BURST_LIMITS.minAvgConfidence && confidenceCount > 0) {
-      warnings.push(`Low average confidence: ${avgConfidence.toFixed(1)} < ${BURST_LIMITS.minAvgConfidence} threshold`);
-    }
-
-    // === PHASE 6: Consolidation Validation (if provided) ===
-    
-    if (consolidation) {
-      const { winningPath, verdict } = consolidation;
-      
-      // Validate path references
-      const thoughtNumbers = new Set(thoughts.map(t => t.thoughtNumber));
-      const invalidRefs = winningPath.filter(n => !thoughtNumbers.has(n));
-      if (invalidRefs.length > 0) {
-        errors.push(`Invalid winning path references: ${invalidRefs.join(', ')}`);
-      }
-
-      // Validate path connectivity (WARNING, not ERROR - allows selective paths)
-      if (winningPath.length > 1 && invalidRefs.length === 0) {
-        // Build thought map for connectivity check
-        const thoughtMap = new Map(thoughts.map(t => [t.thoughtNumber, t]));
-        const pathGaps: string[] = [];
-        
-        for (let i = 1; i < winningPath.length; i++) {
-          const current = winningPath[i];
-          const previous = winningPath[i - 1];
-          const currentThought = thoughtMap.get(current);
-          
-          if (!currentThought) continue;
-          
-          const validPredecessors = new Set<number>([current - 1]);
-          if (currentThought.branchFromThought) validPredecessors.add(currentThought.branchFromThought);
-          if (currentThought.isRevision && currentThought.revisesThought) {
-            validPredecessors.add(currentThought.revisesThought);
-            validPredecessors.add(currentThought.revisesThought - 1);
-          }
-          
-          if (!validPredecessors.has(previous)) {
-            // Changed from error to warning - allows selective key thoughts in path
-            pathGaps.push(`#${previous}→#${current}`);
-          }
-        }
-        
-        if (pathGaps.length > 0) {
-          warnings.push(`Path has gaps (${pathGaps.join(', ')}). Consider using branches or including intermediate thoughts for full traceability.`);
-        }
-      }
-
-      // Check for unaddressed blockers in winning path
-      if (verdict === 'ready') {
-        for (const num of winningPath) {
-          const thought = thoughts.find(t => t.thoughtNumber === num);
-          if (thought?.extensions) {
-            const hasBlocker = thought.extensions.some(e => e.impact === 'blocker');
-            if (hasBlocker) {
-              const hasRevision = thoughts.some(t => t.isRevision && t.revisesThought === num);
-              if (!hasRevision) {
-                errors.push(`Unaddressed blocker in thought #${num} - cannot mark as ready`);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // === PHASE 7: Decision ===
-    
-    const passed = errors.length === 0;
-    const metrics: import('../types/thought.types.js').BurstMetrics = {
-      avgConfidence: Math.round(avgConfidence * 10) / 10,
-      avgEntropy: Math.round(avgEntropy * 100) / 100,
-      avgLength: Math.round(avgLength),
-      stagnationScore: Math.round(stagnationScore * 100) / 100,
-      thoughtCount: thoughts.length,
-    };
-
-    if (!passed) {
-      console.error(`🚫 Burst session REJECTED: ${errors.length} errors`);
-      return {
-        status: 'rejected',
-        sessionId: '',
-        thoughtsProcessed: 0,
-        validation: { passed: false, errors, warnings },
-        metrics,
-        errorMessage: errors.join('; '),
-      };
-    }
-
-    // === PHASE 8: Commit Session ===
-    
-    // Generate new session ID
+    // === Commit Session ===
     this.currentSessionId = new Date().toISOString();
     this.sessionGoal = goal;
-    
-    // Clear previous session
     this.reset();
-    
-    // Convert BurstThoughts to ThoughtRecords and add to history
-    for (const t of sortedThoughts) {
-      const record: ThoughtRecord = {
-        thought: t.thought.substring(0, BURST_LIMITS.maxThoughtLength),
-        thoughtNumber: t.thoughtNumber,
-        totalThoughts: thoughts.length,
-        nextThoughtNeeded: t.thoughtNumber < thoughts.length,
-        confidence: t.confidence,
-        subSteps: t.subSteps,
-        alternatives: t.alternatives,
-        isRevision: t.isRevision,
-        revisesThought: t.revisesThought,
-        branchFromThought: t.branchFromThought,
-        branchId: t.branchId,
-        timestamp: Date.now(),
-        sessionId: this.currentSessionId,
-        extensions: t.extensions?.map(e => ({
-          type: e.type,
-          content: e.content,
-          impact: e.impact ?? 'medium',
-          timestamp: new Date().toISOString(),
-        })),
-      };
-      
+
+    // Convert and add thoughts to history
+    for (const t of validation.sortedThoughts) {
+      const record = this.burstService.toThoughtRecord(t, thoughts.length, this.currentSessionId);
       this.thoughtHistory.push(record);
       this.lastThoughtNumber = Math.max(this.lastThoughtNumber, t.thoughtNumber);
-      
+
       // Handle branches
       if (t.branchFromThought && t.branchId) {
         const branchHistory = this.branches.get(t.branchId) ?? [];
@@ -2216,32 +1012,53 @@ export class ThinkingService {
       }
     }
 
-    // Invalidate Fuse index
     this.invalidateFuseIndex();
-
-    // Save session
+    
+    // v5.0.1: Async save - don't block response
     this.saveSession().catch(err => console.error('Failed to save burst session:', err));
 
-    // Generate system advice
+    // v5.0.1: Minimal system advice - only real issues
     let systemAdvice: string | undefined;
-    if (warnings.length > 0) {
-      systemAdvice = `⚠️ Warnings: ${warnings.join('; ')}`;
-    }
-    if (!consolidation) {
-      systemAdvice = (systemAdvice ? systemAdvice + '\n' : '') + 
-        '💡 TIP: Call consolidate_and_verify to formally close the session.';
+    if (validation.warnings.length > 0) {
+      systemAdvice = `⚠️ ${validation.warnings.join('; ')}`;
     }
 
-    console.error(`✅ Burst session ACCEPTED: ${thoughts.length} thoughts, session=${this.currentSessionId.substring(0, 10)}...`);
+    // v5.0.2: Auto-save insight if consolidation with verdict='ready'
+    if (consolidation?.verdict === 'ready') {
+      this.insightsService.saveWinningPath({
+        path: consolidation.winningPath,
+        summary: consolidation.summary,
+        goal,
+        avgConfidence: validation.metrics.avgConfidence,
+        sessionLength: thoughts.length,
+      }).catch(err => console.error('Failed to save insight:', err));
+      systemAdvice = (systemAdvice ? systemAdvice + ' | ' : '') + '💾 Insight saved';
+    }
+
+    console.error(`✅ Burst: ${thoughts.length}t, session=${this.currentSessionId.substring(0, 10)}...`);
+
+    // v4.6.0: Generate nudge for batch (only if no systemAdvice)
+    const hasAlternatives = thoughts.some(t => t.alternatives && t.alternatives.length > 0);
+    const hasBlockers = thoughts.some(t => t.extensions?.some(e => e.impact === 'blocker'));
+    const nudge = !systemAdvice 
+      ? this.nudgeService.generateBatchNudge(
+          validation.metrics.avgConfidence,
+          thoughts.length,
+          hasAlternatives,
+          hasBlockers
+        )
+      : undefined;
 
     return {
       status: 'accepted',
       sessionId: this.currentSessionId,
       thoughtsProcessed: thoughts.length,
-      validation: { passed: true, errors: [], warnings },
-      metrics,
+      validation: { passed: true, errors: [], warnings: validation.warnings },
+      metrics: validation.metrics,
+      // v5.0.1: Tree is lazy - generated only when requested via showTree param
       thoughtTree: this.generateAsciiTree(),
       systemAdvice,
+      nudge,
     };
   }
 
@@ -2250,209 +1067,54 @@ export class ThinkingService {
   // ============================================
 
   /**
-   * Build searchable items array for Fuse.js index
-   * Extracts thoughts, extensions, alternatives, and subSteps
-   */
-  private buildSearchItems(thoughts: ThoughtRecord[]): FuseSearchItem[] {
-    const items: FuseSearchItem[] = [];
-
-    for (const t of thoughts) {
-      // Add main thought
-      items.push({
-        thoughtNumber: t.thoughtNumber,
-        content: t.thought,
-        type: 'thought',
-        confidence: t.confidence,
-        sessionId: t.sessionId,
-        originalThought: t.thought,
-      });
-
-      // Add extensions
-      if (t.extensions) {
-        for (const ext of t.extensions) {
-          items.push({
-            thoughtNumber: t.thoughtNumber,
-            content: ext.content,
-            type: 'extension',
-            extensionType: ext.type,
-            confidence: t.confidence,
-            sessionId: t.sessionId,
-            originalThought: t.thought,
-          });
-        }
-      }
-
-      // Add alternatives
-      if (t.alternatives) {
-        for (const alt of t.alternatives) {
-          items.push({
-            thoughtNumber: t.thoughtNumber,
-            content: alt,
-            type: 'alternative',
-            confidence: t.confidence,
-            sessionId: t.sessionId,
-            originalThought: t.thought,
-          });
-        }
-      }
-
-      // Add subSteps
-      if (t.subSteps) {
-        for (const step of t.subSteps) {
-          items.push({
-            thoughtNumber: t.thoughtNumber,
-            content: step,
-            type: 'subStep',
-            confidence: t.confidence,
-            sessionId: t.sessionId,
-            originalThought: t.thought,
-          });
-        }
-      }
-    }
-
-    return items;
-  }
-
-  /**
-   * Initialize or rebuild Fuse.js index
-   * Called lazily on first search or when index is dirty
-   */
-  private rebuildFuseIndex(scope: RecallScope): void {
-    const thoughts = scope === 'current' 
-      ? this.getCurrentSessionThoughts() 
-      : this.thoughtHistory;
-
-    const items = this.buildSearchItems(thoughts);
-
-    this.fuseIndex = new Fuse(items, {
-      keys: ['content'],
-      threshold: RECALL_DEFAULT_THRESHOLD,
-      includeScore: true,
-      includeMatches: true,
-      minMatchCharLength: 2,
-      ignoreLocation: true, // Search entire content, not just beginning
-    });
-
-    this.fuseIndexDirty = false;
-    console.error(`🔍 Fuse index rebuilt: ${items.length} searchable items from ${thoughts.length} thoughts`);
-  }
-
-  /**
    * Mark Fuse index as dirty (needs rebuild)
-   * Called after adding new thoughts
+   * Delegates to RecallService
    */
   private invalidateFuseIndex(): void {
-    this.fuseIndexDirty = true;
+    this.recallService.invalidateIndex();
   }
 
   /**
-   * Extract snippet with context around the match
-   * Returns ~200 chars centered on the match
-   */
-  private extractSnippet(text: string, query: string): string {
-    const lowerText = text.toLowerCase();
-    const lowerQuery = query.toLowerCase().split(/\s+/)[0]; // Use first word for matching
-    const idx = lowerText.indexOf(lowerQuery);
-
-    if (idx === -1) {
-      // Fuzzy match - return beginning of text
-      return text.length > 200 ? text.substring(0, 200) + '...' : text;
-    }
-
-    // Extract context window around match
-    const start = Math.max(0, idx - RECALL_SNIPPET_CONTEXT);
-    const end = Math.min(text.length, idx + lowerQuery.length + RECALL_SNIPPET_CONTEXT);
-    
-    const prefix = start > 0 ? '...' : '';
-    const suffix = end < text.length ? '...' : '';
-    
-    // Find word boundaries for cleaner snippets
-    let snippetStart = start;
-    let snippetEnd = end;
-    
-    if (start > 0) {
-      const spaceIdx = text.indexOf(' ', start);
-      if (spaceIdx !== -1 && spaceIdx < idx) {
-        snippetStart = spaceIdx + 1;
-      }
-    }
-    
-    if (end < text.length) {
-      const spaceIdx = text.lastIndexOf(' ', end);
-      if (spaceIdx !== -1 && spaceIdx > idx) {
-        snippetEnd = spaceIdx;
-      }
-    }
-
-    return prefix + text.substring(snippetStart, snippetEnd).trim() + suffix;
-  }
-
-  /**
-   * RECALL THOUGHT (v3.4.0) - Fuzzy search through thought history
-   * Helps model "remember" details from earlier in the session
+   * RECALL THOUGHT - Fuzzy search through thought history
+   * Delegates to RecallService
    */
   recallThought(input: RecallInput): RecallResult {
-    const {
-      query,
-      scope = 'current',
-      searchIn = 'all',
-      limit = RECALL_DEFAULT_LIMIT,
-      threshold = RECALL_DEFAULT_THRESHOLD,
-    } = input;
+    const thoughts = input.scope === 'current' 
+      ? this.getCurrentSessionThoughts() 
+      : this.thoughtHistory;
+    return this.recallService.recallThought(input, thoughts);
+  }
 
-    // Validate query
-    if (!query || query.trim().length < 2) {
-      return {
-        matches: [],
-        totalSearched: 0,
-        query,
-        searchParams: { scope, searchIn, threshold },
-      };
-    }
+  // ============================================
+  // v4.1.0 - Insights Edition: Cross-Session Learning
+  // ============================================
 
-    // Rebuild index if dirty or scope changed
-    if (this.fuseIndexDirty || !this.fuseIndex) {
-      this.rebuildFuseIndex(scope);
-    }
+  /**
+   * Search past insights for relevant solutions
+   * Delegates to InsightsService
+   */
+  async recallInsights(query: string, limit = 3): Promise<import('./insights.service.js').InsightsSearchResult> {
+    return this.insightsService.search(query, limit);
+  }
 
-    // Perform search (get more results than needed for filtering)
-    const rawResults = this.fuseIndex?.search(query, { limit: limit * 5 }) ?? [];
+  /**
+   * Get insights statistics
+   * Delegates to InsightsService
+   */
+  async getInsightsStats(): Promise<{
+    totalInsights: number;
+    totalSessions: number;
+    topPatterns: { keyword: string; count: number }[];
+    avgSessionLength: number;
+    avgConfidence: number;
+  }> {
+    return this.insightsService.getStats();
+  }
 
-    // Filter by threshold (Fuse returns score where lower = better match)
-    const thresholdFiltered = rawResults.filter(r => (r.score ?? 1) <= threshold);
-
-    // Filter by searchIn parameter
-    const filteredResults = thresholdFiltered.filter(r => {
-      if (searchIn === 'all') return true;
-      if (searchIn === 'thoughts') return r.item.type === 'thought';
-      if (searchIn === 'extensions') return r.item.type === 'extension';
-      if (searchIn === 'alternatives') return r.item.type === 'alternative' || r.item.type === 'subStep';
-      return true;
-    });
-
-    // Map to RecallMatch format
-    const matches: RecallMatch[] = filteredResults.slice(0, limit).map(r => ({
-      thoughtNumber: r.item.thoughtNumber,
-      snippet: this.extractSnippet(r.item.content, query),
-      thought: r.item.originalThought.length > 300 
-        ? r.item.originalThought.substring(0, 300) + '...' 
-        : r.item.originalThought,
-      confidence: r.item.confidence,
-      relevance: r.score ?? 1,
-      matchedIn: r.item.type,
-      extensionType: r.item.extensionType as import('../types/thought.types.js').ExtensionType | undefined,
-      sessionId: r.item.sessionId,
-    }));
-
-    // Log search
-    console.error(`🔍 Recall search: "${query}" → ${matches.length} matches (searched ${filteredResults.length} items)`);
-
-    return {
-      matches,
-      totalSearched: rawResults.length,
-      query,
-      searchParams: { scope, searchIn, threshold },
-    };
+  /**
+   * Load insights on service initialization
+   */
+  async loadInsights(): Promise<void> {
+    await this.insightsService.load();
   }
 }

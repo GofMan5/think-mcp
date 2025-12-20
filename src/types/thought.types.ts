@@ -118,6 +118,8 @@ export interface ThinkingResult {
   errorMessage?: string;
   /** Session goal for focus retention (v2.10.0) */
   sessionGoal?: string;
+  /** Proactive micro-prompt for self-reflection (v4.6.0) */
+  nudge?: string;
 }
 
 /** Session data for persistence */
@@ -273,16 +275,7 @@ export interface RecallResult {
 // v4.0.0 - Burst Thinking Edition
 // ============================================
 
-/** Limits for burst thinking validation */
-export const BURST_LIMITS = {
-  maxThoughts: 30,
-  minThoughts: 1,
-  maxThoughtLength: 1000,
-  minThoughtLength: 50,
-  maxStagnationScore: 0.6,
-  minAvgEntropy: 0.25,
-  minAvgConfidence: 4,
-} as const;
+// BURST_LIMITS moved to burst.service.ts to avoid duplication (v4.2.0)
 
 /** Single thought in a burst session */
 export interface BurstThought {
@@ -341,4 +334,40 @@ export interface SubmitSessionResult {
   thoughtTree?: string;
   systemAdvice?: string;
   errorMessage?: string;
+  /** Proactive micro-prompt for self-reflection (v4.6.0) */
+  nudge?: string;
+}
+
+
+// ============================================
+// v4.1.0 - Insights Edition (Cross-Session Learning)
+// ============================================
+
+/** Input for recall_insights tool */
+export interface RecallInsightsInput {
+  /** Search query for finding relevant past solutions */
+  query: string;
+  /** Maximum results to return (default: 3) */
+  limit?: number;
+}
+
+/** Result from recall_insights tool */
+export interface RecallInsightsResult {
+  /** Matching insights from past sessions */
+  matches: {
+    /** Summary of the past solution */
+    summary: string;
+    /** Goal that was achieved */
+    goal?: string;
+    /** Keywords associated with this insight */
+    keywords: string[];
+    /** When this insight was recorded */
+    timestamp: string;
+    /** Relevance score (0-1, lower = better match) */
+    relevance: number;
+  }[];
+  /** Total insights in storage */
+  totalInsights: number;
+  /** Top recurring patterns */
+  topPatterns: { keyword: string; count: number }[];
 }
