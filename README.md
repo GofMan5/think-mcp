@@ -1,4 +1,4 @@
-# 🧠 Think MCP v4.0
+# 🧠 Think MCP v4.1
 
 [![npm version](https://badge.fury.io/js/%40gofman3%2Fthink-mcp.svg)](https://www.npmjs.com/package/@gofman3/think-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -177,6 +177,11 @@ Export session as Markdown or JSON with optional Mermaid diagram.
 | Complex   | 8-30     | `submit_thinking_session` (Burst) |
 
 ## 🔄 Changelog
+
+### v4.1.0
+- **Improved:** Better error messages for `submit_thinking_session` — warns about JSON truncation
+- **Improved:** Tool descriptions now include troubleshooting tips
+- **Docs:** Updated README with full v4.0 documentation
 
 ### v4.0.1
 - **Fix:** Path discontinuity changed from ERROR to WARNING — allows selective key thoughts in `winningPath`

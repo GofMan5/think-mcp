@@ -527,31 +527,30 @@ const SUBMIT_SESSION_DESCRIPTION = `Submit a complete thinking session in one ca
 
 USE THIS when you have a complete reasoning chain ready - reduces N round-trips to 1.
 
+⚠️ CRITICAL: If you get "missing thoughts" error, your JSON was TRUNCATED!
+   Solution: Reduce to 5-10 thoughts max, or use sequentialthinking instead.
+
 Input:
 - goal: Session goal (required, min 10 chars)
-- thoughts: Array of 1-30 thoughts with:
-  - thoughtNumber: Sequential number
+- thoughts: REQUIRED array of 1-30 thoughts with:
+  - thoughtNumber: Sequential number (1, 2, 3...)
   - thought: Content (min 50 chars, max 1000 chars)
   - confidence: 1-10 (optional)
   - subSteps, alternatives, extensions (optional)
-  - isRevision, revisesThought (for revisions)
-  - branchFromThought, branchId (for branches)
 - consolidation: Optional {winningPath, summary, verdict}
 
 Validation (atomic - all or nothing):
 - Sequence check: thought numbers must be sequential
-- Stagnation check: Jaccard similarity < 60% between adjacent thoughts
-- Entropy check: vocabulary diversity > 0.25
-- Depth check: average length > 50 chars
-- Connectivity check: winning path must be logically connected
+- Stagnation check: < 60% similarity between adjacent thoughts
+- Path gaps: WARNING (allows selective key thoughts in winningPath)
+- Blockers: ERROR if verdict='ready' but unaddressed blockers exist
 
 Returns:
 - status: 'accepted' or 'rejected'
-- sessionId: Unique session identifier
 - metrics: avgConfidence, avgEntropy, avgLength, stagnationScore
-- validation: {passed, errors, warnings}
 
-⚠️ If rejected, fix ALL errors and resubmit the entire session.`;
+⚠️ If rejected, fix ALL errors and resubmit.
+💡 For complex analysis (12+ thoughts), consider splitting into multiple sessions.`;
 
 // Quick extension schema for burst thoughts
 const burstExtensionSchema = z.object({
@@ -584,7 +583,7 @@ const burstConsolidationSchema = z.object({
 // Submit session input schema
 const submitSessionSchema = {
   goal: z.string().min(10).describe('Session goal - required for burst thinking'),
-  thoughts: z.array(burstThoughtSchema).min(1).max(30).describe('Array of thoughts (1-30)'),
+  thoughts: z.array(burstThoughtSchema).min(1).max(30).describe('REQUIRED: Array of 1-30 thoughts. Each thought must have thoughtNumber and thought (min 50 chars). If you see "missing thoughts" error, your JSON was truncated - reduce the number of thoughts or shorten content.'),
   consolidation: burstConsolidationSchema.optional().describe('Optional consolidation if ready'),
 };
 
