@@ -1,6 +1,6 @@
 {
   "name": "@gofman3/think-mcp",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "type": "module",
   "description": "MCP Server for structured sequential thinking with Burst Thinking, branching, revisions, dead-ends tracking, and fuzzy recall",
   "author": "GofMan3",
@@ -11,7 +11,7 @@
   },
   "homepage": "https://github.com/GofMan5/think-mcp#readme",
   "bugs": {
-    "url": "https://github.com/GofMan5GofMan5/think-mcp/issues"
+    "url": "https://github.com/GofMan5/think-mcp/issues"
   },
   "keywords": [
     "mcp",
