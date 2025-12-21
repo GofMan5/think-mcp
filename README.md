@@ -1,9 +1,11 @@
-# 🧠 Think MCP v4.6
+# 🧠 Think MCP v4.6.2
 
 [![npm version](https://badge.fury.io/js/%40gofman3%2Fthink-mcp.svg)](https://www.npmjs.com/package/@gofman3/think-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 MCP Server for structured sequential thinking. Helps LLMs break down complex problems into manageable steps with branching, revisions, cross-session learning, and proactive nudges.
+
+> 📝 **Base Prompt:** [pastebin.com/EJcJ3fJF](https://pastebin.com/EJcJ3fJF)
 
 ## ✨ Features
 
@@ -158,3 +160,53 @@ Nudges appear only when there's no other systemAdvice — avoiding noise.
 ## 📄 License
 
 MIT
+
+---
+
+## 🎯 How to Use (for humans)
+
+### Simple task — DON'T USE TOOLS
+```
+You: "Add console.log for debugging"
+AI: *just does it, no thinking needed*
+```
+
+### Medium/Complex task — FULL WORKFLOW
+
+**Example prompt:**
+```
+Working directory: C:/Projects/my-backend
+
+1. Study folders src/auth/ and src/utils/
+2. use think_batch — analyze architecture and edge cases
+3. use task_spec — create specification with tasks
+
+Goal: "Build robust password validation backend logic"
+
+Requirements:
+- Minimum 8 characters
+- At least 1 digit, 1 special character
+- Check against leaked passwords (haveibeenpwned API)
+- Rate limiting on validation
+```
+
+**What happens:**
+1. AI studies specified folders
+2. `think_batch` — thinks through edge cases (what if API is down? what about unicode passwords?)
+3. `task_spec` — creates spec with tasks in `.gofman3/specs/password-validation/`
+4. You'll see files:
+   - `requirements.md` — what we're building
+   - `design.md` — how we're building  
+   - `tasks.md` — progress (auto-updates!)
+
+### Track progress
+```
+Show task_board
+```
+AI shows Kanban board — what's done, in progress, blocked.
+
+### If AI is stuck
+```
+use think_recall query: "password validation" scope: insights
+```
+Searches past sessions for similar solutions.
