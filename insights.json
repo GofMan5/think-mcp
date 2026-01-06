@@ -754,6 +754,230 @@
       "timestamp": "2025-12-21T15:45:52.930Z",
       "avgConfidence": 8.2,
       "sessionLength": 5
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "summary": "Комбинация лучше: Excellence даёт мотивацию (WHY), Google даёт конкретику (HOW). Но нужно интегрировать компактно, не склеивать. Оптимум: Excellence-заголовок + Google-правила + один объединяющий вопрос.",
+      "goal": "Определить оптимальную структуру промпта: Excellence только, Google только, или комбинация — без bloat и overkill",
+      "keywords": [
+        "excellence",
+        "why",
+        "google",
+        "how",
+        "excellence-",
+        "google-",
+        "bloat",
+        "overkill"
+      ],
+      "timestamp": "2025-12-22T11:49:13.595Z",
+      "avgConfidence": 8.7,
+      "sessionLength": 6
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "summary": "Комбинация лучше: Excellence даёт мотивацию (WHY), Google даёт конкретику (HOW). Нужно интегрировать компактно в одну секцию: Excellence-заголовок + Google-правила + один объединяющий вопрос.",
+      "keywords": [
+        "excellence",
+        "why",
+        "google",
+        "how",
+        "excellence-",
+        "google-"
+      ],
+      "timestamp": "2025-12-22T11:49:22.018Z",
+      "avgConfidence": 8.8,
+      "sessionLength": 6
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "summary": "think_logic - универсальный tool для глубокого логического анализа. Input: target + context + depth + focus. Output: Chain Map + Cracks + Standard + Actions. Реализация через LogicService (stateless). Минимальная структура: 3 файла.",
+      "goal": "Спроектировать и реализовать think_logic - новый MCP tool для глубокого логического анализа любой задачи с выводом пошаговой цепочки рассуждений",
+      "keywords": [
+        "think",
+        "logic",
+        "tool",
+        "input",
+        "target",
+        "context",
+        "depth",
+        "focus",
+        "output",
+        "chain",
+        "mcp"
+      ],
+      "timestamp": "2026-01-06T23:16:41.654Z",
+      "avgConfidence": 8.6,
+      "sessionLength": 8
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "summary": "Реализован think_logic - новый MCP tool для глубокого логического анализа. Создан LogicService (stateless), добавлены типы, зарегистрирован tool в index.ts. Версия обновлена до 4.7.0.",
+      "keywords": [
+        "think",
+        "logic",
+        "mcp",
+        "tool",
+        "logicservice",
+        "stateless",
+        "index"
+      ],
+      "timestamp": "2026-01-06T23:19:57.302Z",
+      "avgConfidence": 8.6,
+      "sessionLength": 8
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "summary": "Fixed 3 issues: 1) RegExp escape bug in text-analysis.ts, 2) Added clearWordCache() to reset(), 3) Improved LogicService with better flow detection (service/CLI/event) and self-reference check to reduce false positives",
+      "keywords": [
+        "fixed",
+        "issues",
+        "regexp",
+        "escape",
+        "bug",
+        "text-analysis",
+        "added",
+        "clearwordcache",
+        "reset",
+        "improved"
+      ],
+      "timestamp": "2026-01-06T23:27:11.273Z",
+      "avgConfidence": 8.1,
+      "sessionLength": 5
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "summary": "Enhanced think_logic v4.8.0 with: 1) Stack-aware detection for 8 tech stacks (nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs), 2) WHY analysis (possibleCauses + debugSteps) for each crack, 3) Interactive questions in deep mode, 4) Deduplication to prefer stack-specific over generic patterns",
+      "keywords": [
+        "enhanced",
+        "think",
+        "logic",
+        "stack-aware",
+        "detection",
+        "tech",
+        "stacks",
+        "nestjs",
+        "prisma",
+        "ts-rest"
+      ],
+      "timestamp": "2026-01-06T23:37:37.953Z",
+      "avgConfidence": 8.1,
+      "sessionLength": 5
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "summary": "BurstService is well-designed. Minor improvements: 1) Add bounds validation for thoughtNumber (1-30) and confidence (1-10). 2) validateConsolidation mutates arrays - minor smell but works. No architectural changes needed.",
+      "keywords": [
+        "burstservice",
+        "well-designed",
+        "minor",
+        "improvements",
+        "add",
+        "bounds",
+        "validation",
+        "thoughtnumber",
+        "1-30",
+        "confidence"
+      ],
+      "timestamp": "2026-01-06T23:54:50.827Z",
+      "avgConfidence": 8.2,
+      "sessionLength": 6
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "summary": "think_logic лучше на 30-40% для универсальных задач (любой ЯП/стек). Для твоего конкретного стека (ts-rest/NestJS/Prisma) - примерно равны, промпт даже чуть лучше из-за конкретных примеров. Они ДОПОЛНЯЮТ друг друга, не заменяют.",
+      "keywords": [
+        "think",
+        "logic",
+        "30-40",
+        "ts-rest",
+        "nestjs",
+        "prisma"
+      ],
+      "timestamp": "2026-01-06T23:56:16.044Z",
+      "avgConfidence": 8.5,
+      "sessionLength": 8
+    },
+    {
+      "path": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "summary": "Я наврал про 30-40%. think_logic и промпт делают ОДНО И ТО ЖЕ - выдают текст с методологией. Разница только в доставке: промпт автоматический, think_logic надо вызывать. Единственное реальное преимущество - параметризация (depth/focus/stack).",
+      "keywords": [
+        "30-40",
+        "think",
+        "logic",
+        "depth",
+        "focus",
+        "stack"
+      ],
+      "timestamp": "2026-01-06T23:57:31.856Z",
+      "avgConfidence": 8.8,
+      "sessionLength": 6
     }
   ],
   "patterns": {
@@ -762,7 +986,7 @@
     "progress": 3,
     "bar": 1,
     "status": 4,
-    "confidence": 1,
+    "confidence": 2,
     "extensions": 1,
     "think-module": 3,
     "quickextension": 2,
@@ -770,7 +994,7 @@
     "thought": 1,
     "export": 4,
     "merged": 1,
-    "think": 4,
+    "think": 9,
     "done": 2,
     "god": 5,
     "object": 2,
@@ -782,7 +1006,7 @@
     "undo": 1,
     "tags": 1,
     "collab": 1,
-    "mcp": 7,
+    "mcp": 9,
     "gemini": 1,
     "actionable": 1,
     "items": 1,
@@ -791,7 +1015,7 @@
     "async": 3,
     "deep": 1,
     "research": 1,
-    "tool": 5,
+    "tool": 7,
     "nudge": 2,
     "response": 2,
     "prompt-": 1,
@@ -800,7 +1024,7 @@
     "submitsession": 1,
     "thinkingservice": 2,
     "insights": 1,
-    "overkill": 9,
+    "overkill": 10,
     "50kb": 1,
     "15kb": 1,
     "zlib": 1,
@@ -824,7 +1048,7 @@
     "pre-consolidation": 1,
     "audit": 1,
     "stagnation": 1,
-    "detection": 1,
+    "detection": 2,
     "reflect": 1,
     "recall": 1,
     "llm": 1,
@@ -866,7 +1090,7 @@
     "list": 4,
     "view": 1,
     "linkedthought": 1,
-    "index": 2,
+    "index": 3,
     "priority": 1,
     "debounced": 1,
     "spec": 3,
@@ -881,7 +1105,7 @@
     "autoexport": 1,
     "generate": 2,
     "compact": 1,
-    "output": 1,
+    "output": 2,
     "task": 6,
     "manage": 1,
     "action": 2,
@@ -890,7 +1114,7 @@
     "focusfiles": 1,
     "tasktemplates": 1,
     "ischeckpoint": 1,
-    "context": 1,
+    "context": 2,
     "file": 2,
     "subtasks": 2,
     "start": 1,
@@ -916,8 +1140,51 @@
     "hook": 1,
     "tools": 1,
     "quickstart": 1,
-    "workflow": 1
+    "workflow": 1,
+    "excellence": 2,
+    "why": 2,
+    "google": 2,
+    "how": 2,
+    "excellence-": 2,
+    "google-": 2,
+    "bloat": 1,
+    "logic": 5,
+    "input": 1,
+    "target": 1,
+    "depth": 2,
+    "focus": 2,
+    "chain": 1,
+    "logicservice": 1,
+    "stateless": 1,
+    "fixed": 1,
+    "issues": 1,
+    "regexp": 1,
+    "escape": 1,
+    "bug": 1,
+    "text-analysis": 1,
+    "added": 1,
+    "clearwordcache": 1,
+    "reset": 1,
+    "improved": 1,
+    "enhanced": 1,
+    "stack-aware": 1,
+    "tech": 1,
+    "stacks": 1,
+    "nestjs": 2,
+    "prisma": 2,
+    "ts-rest": 2,
+    "burstservice": 1,
+    "well-designed": 1,
+    "minor": 1,
+    "improvements": 1,
+    "add": 1,
+    "bounds": 1,
+    "validation": 1,
+    "thoughtnumber": 1,
+    "1-30": 1,
+    "30-40": 2,
+    "stack": 1
   },
-  "totalSessions": 31,
-  "lastUpdated": "2025-12-21T15:45:52.931Z"
+  "totalSessions": 40,
+  "lastUpdated": "2026-01-06T23:57:31.856Z"
 }

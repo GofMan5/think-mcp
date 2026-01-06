@@ -891,6 +891,8 @@ export class ThinkingService {
     this.currentSessionId = ''; // Clear sessionId on reset (v2.11.0)
     this.coachingService.reset(); // Clear coach cooldown (v3.2.0)
     this.deadEnds = []; // Clear dead ends (v3.3.0)
+    // v4.7.1: Clear word cache to prevent stale data across sessions
+    import('../utils/text-analysis.js').then(m => m.clearWordCache());
   }
 
   /**

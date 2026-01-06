@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Think Module MCP Server v4.6.0
- * Streamlined thinking tools: 5 instead of 8
+ * Think Module MCP Server v4.7.0
+ * Streamlined thinking tools: 6 tools
  * 
+ * v4.7.0: Added think_logic for deep logical analysis
  * v4.6.0: Added NudgeService for proactive micro-prompts
  * 
  * Tools:
@@ -11,6 +12,7 @@
  * - think_done: Finish session, verify, optionally export
  * - think_recall: Search session or past insights
  * - think_reset: Clear session
+ * - think_logic: Deep logical analysis of any task/feature/system
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -23,7 +25,7 @@ const thinkingService = new ThinkingService();
 
 const server = new McpServer({
   name: 'think-module-server',
-  version: '4.6.0',
+  version: '4.7.0',
 });
 
 // ============================================
@@ -385,6 +387,72 @@ server.registerTool('think_reset', { title: 'Think Reset', description: THINK_RE
 );
 
 // ============================================
+// 6. THINK_LOGIC - Methodology Generator for Deep Logical Analysis
+// ============================================
+
+import { LogicService } from './services/logic.service.js';
+import type { LogicDepth, LogicFocus, TechStack } from './types/thought.types.js';
+
+const logicService = new LogicService();
+
+const THINK_LOGIC_DESCRIPTION = `Deep logical analysis of any task, feature, or system.
+
+v5.0.0 - METHODOLOGY EDITION
+This tool generates a THINKING FRAMEWORK for AI to follow, not pre-computed results.
+It provides INSTRUCTIONS on how to analyze code, not the analysis itself.
+
+Output is a structured methodology with 4 phases:
+1. CHAIN MAPPING: Instructions to trace data flow step-by-step
+2. CRACK HUNTING: Questions to ask about each step (not pattern-matched answers)
+3. STANDARD BENCHMARK: Checklist to compare against Google-level standards
+4. ACTION TEMPLATE: How to document and fix found issues
+
+Use for:
+- Pre-implementation analysis ("How should I think about this?")
+- Code review preparation ("What questions should I ask?")
+- Architecture validation ("What standards should I check?")
+- Bug investigation ("How do I trace this issue?")
+
+Depth levels:
+- quick: Essential checks only (fast overview)
+- standard: Comprehensive methodology (default)
+- deep: Exhaustive with all standards and stack-specific checks
+
+Focus areas: security, performance, reliability, ux, architecture, data-flow
+Tech stacks: nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs`;
+
+const thinkLogicSchema = {
+  target: z.string().min(10).describe('What to analyze (feature, flow, component, system description)'),
+  context: z.string().optional().describe('Additional context (tech stack, constraints, requirements)'),
+  depth: z.enum(['quick', 'standard', 'deep']).optional().default('standard').describe('Methodology depth'),
+  focus: z.array(z.enum(['security', 'performance', 'reliability', 'ux', 'architecture', 'data-flow'])).optional().describe('Focus areas to prioritize'),
+  stack: z.array(z.enum(['nestjs', 'prisma', 'ts-rest', 'react', 'redis', 'zod', 'trpc', 'nextjs'])).optional().describe('Tech stacks for stack-specific checks'),
+};
+
+server.registerTool('think_logic', { title: 'Think Logic', description: THINK_LOGIC_DESCRIPTION, inputSchema: thinkLogicSchema },
+  async (args) => {
+    try {
+      const result = logicService.analyze({
+        target: args.target as string,
+        context: args.context as string | undefined,
+        depth: (args.depth as LogicDepth) ?? 'standard',
+        focus: args.focus as LogicFocus[] | undefined,
+        stack: args.stack as TechStack[] | undefined,
+      });
+
+      if (result.status === 'error') {
+        return { content: [{ type: 'text' as const, text: `🚫 ERROR: ${result.errorMessage}` }], isError: true };
+      }
+
+      const text = logicService.formatAsMarkdown(result);
+      return { content: [{ type: 'text' as const, text }] };
+    } catch (error) {
+      return { content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : 'Unknown'}` }], isError: true };
+    }
+  }
+);
+
+// ============================================
 // Server startup
 // ============================================
 
@@ -394,7 +462,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Think Module MCP Server v4.6.0 running on stdio');
+  console.error('Think Module MCP Server v4.7.0 running on stdio');
 }
 
 main().catch((error) => {

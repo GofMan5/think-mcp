@@ -1,14 +1,14 @@
 /**
  * Text analysis utilities for ThinkingService
  * Pure stateless functions for text processing
- * v4.2.0 - Optimized with precompiled RegExp and word caching
+ * v4.7.1 - Fixed RegExp escape pattern
  */
 
 import { FILLER_PHRASES, TECHNICAL_SHORT_TERMS } from '../constants/index.js';
 
 // Precompiled RegExp for filler phrases (O(1) instead of O(n) per call)
 const FILLER_PATTERN = new RegExp(
-  FILLER_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+  FILLER_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join('|'),
   'gi'
 );
 

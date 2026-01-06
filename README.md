@@ -1,15 +1,16 @@
-# 🧠 Think MCP v4.6.2
+# 🧠 Think MCP v5.0.0
 
 [![npm version](https://badge.fury.io/js/%40gofman3%2Fthink-mcp.svg)](https://www.npmjs.com/package/@gofman3/think-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-MCP Server for structured sequential thinking. Helps LLMs break down complex problems into manageable steps with branching, revisions, cross-session learning, and proactive nudges.
+MCP Server for structured sequential thinking. Helps LLMs break down complex problems into manageable steps with branching, revisions, cross-session learning, logic methodology generator, and proactive nudges.
 
 > 📝 **Base Prompt:** [pastebin.com/EJcJ3fJF](https://pastebin.com/EJcJ3fJF)
 
 ## ✨ Features
 
-- **5 Streamlined Tools** — `think`, `think_batch`, `think_done`, `think_recall`, `think_reset`
+- **6 Streamlined Tools** — `think`, `think_batch`, `think_done`, `think_recall`, `think_reset`, `think_logic`
+- **Logic Methodology Generator** — On-demand deep analysis framework for specific features
 - **Burst Thinking** — Submit up to 30 thoughts in one call
 - **Cross-Session Learning** — Insights from past sessions via `think_recall(scope:insights)`
 - **Proactive Nudges** — Short prompts for self-reflection when patterns detected
@@ -115,6 +116,33 @@ Search current session or past insights.
 ### `think_reset`
 Clear session and start fresh.
 
+### `think_logic`
+Generate thinking methodology for deep analysis of specific features/flows.
+
+```typescript
+{
+  target: string,              // What to analyze (min 10 chars)
+  context?: string,            // Additional context
+  depth?: 'quick' | 'standard' | 'deep',
+  focus?: ('security' | 'performance' | 'reliability' | 'ux' | 'architecture' | 'data-flow')[],
+  stack?: ('nestjs' | 'prisma' | 'ts-rest' | 'react' | 'redis' | 'zod' | 'trpc' | 'nextjs')[]
+}
+```
+
+**Output:** 4-phase methodology (Chain Mapping → Crack Hunting → Standard Benchmark → Action Planning) that guides AI thinking, not ready answers.
+
+**When to use:**
+- Deep dive into specific feature/bug
+- Different depth levels for different tasks
+- Working with multiple tech stacks
+
+**vs Steering Prompt:**
+| | Steering Prompt | think_logic |
+|---|---|---|
+| Delivery | Automatic every request | On-demand call |
+| Use case | Constant quality baseline | Deep dive into specific code |
+| Flexibility | Static | depth/focus/stack params |
+
 ## 💡 Nudge System (v4.6)
 
 When no warnings are present, the server returns short prompts based on detected patterns:
@@ -137,6 +165,13 @@ Nudges appear only when there's no other systemAdvice — avoiding noise.
 | Complex | 8-30 | `think_batch` |
 
 ## 🔄 Changelog
+
+### v5.0.0
+- **New:** `think_logic` — Logic Methodology Generator for deep analysis
+- **New:** 4-phase methodology (Chain Mapping, Crack Hunting, Standard Benchmark, Action Planning)
+- **New:** Focus areas (security, performance, reliability, ux, architecture, data-flow)
+- **New:** Stack-specific reminders (nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs)
+- **Philosophy:** Teaches AI HOW to think, not WHAT to find
 
 ### v4.6.0
 - **New:** NudgeService — proactive micro-prompts for self-reflection

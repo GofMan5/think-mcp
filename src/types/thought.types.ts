@@ -371,3 +371,160 @@ export interface RecallInsightsResult {
   /** Top recurring patterns */
   topPatterns: { keyword: string; count: number }[];
 }
+
+
+// ============================================
+// v4.7.0 - Logic Analysis Edition
+// ============================================
+
+/** Analysis depth for think_logic */
+export type LogicDepth = 'quick' | 'standard' | 'deep';
+
+/** Focus areas for think_logic */
+export type LogicFocus = 'security' | 'performance' | 'reliability' | 'ux' | 'architecture' | 'data-flow';
+
+/** Severity levels for identified cracks */
+export type CrackSeverity = 'blocker' | 'high' | 'medium' | 'low';
+
+/** Priority levels for action items */
+export type ActionPriority = 'P0' | 'P1' | 'P2' | 'P3';
+
+/** Supported tech stacks for stack-aware analysis */
+export type TechStack = 
+  | 'nestjs'      // NestJS: Guards, Pipes, Interceptors, Exception Filters
+  | 'prisma'      // Prisma: Transactions, Relations, N+1, Migrations
+  | 'ts-rest'     // ts-rest: Contracts, Type inference, Validation
+  | 'react'       // React: Hooks, State, Effects, Suspense
+  | 'redis'       // Redis: Caching, Pub/Sub, TTL, Invalidation
+  | 'zod'         // Zod: Schema validation, Transforms, Refinements
+  | 'trpc'        // tRPC: Procedures, Context, Middleware
+  | 'nextjs';     // Next.js: SSR, ISR, API Routes, Middleware
+
+/** Input for think_logic tool */
+export interface LogicAnalysisInput {
+  /** What to analyze (feature, flow, component, system) */
+  target: string;
+  /** Additional context (tech stack, constraints, requirements) */
+  context?: string;
+  /** Analysis depth: quick (overview), standard (detailed), deep (exhaustive) */
+  depth?: LogicDepth;
+  /** Focus areas to prioritize in analysis */
+  focus?: LogicFocus[];
+  /** Tech stacks to apply stack-specific checks (v4.8.0) */
+  stack?: TechStack[];
+  /** Show chain map section */
+  showChain?: boolean;
+  /** Show cracks section */
+  showCracks?: boolean;
+  /** Show luxury standard section */
+  showStandard?: boolean;
+  /** Show action items section */
+  showActions?: boolean;
+}
+
+/** Single step in the logic chain */
+export interface LogicChainStep {
+  /** Step number in sequence */
+  step: number;
+  /** Step name/title */
+  name: string;
+  /** What happens at this step */
+  description: string;
+  /** Components/systems involved */
+  components?: string[];
+  /** Data transformations */
+  dataFlow?: string;
+}
+
+/** Identified crack/weakness in the logic */
+export interface LogicCrack {
+  /** Unique identifier */
+  id: string;
+  /** Severity level */
+  severity: CrackSeverity;
+  /** Which chain step this affects */
+  affectsStep?: number;
+  /** Category of the crack */
+  category: string;
+  /** Description of the issue */
+  description: string;
+  /** Potential impact if not addressed */
+  impact: string;
+  /** Related focus area */
+  focus?: LogicFocus;
+  /** Possible root causes (v4.8.0 - WHY analysis) */
+  possibleCauses?: string[];
+  /** Debug steps to investigate (v4.8.0) */
+  debugSteps?: string[];
+  /** Stack-specific if detected from tech stack */
+  fromStack?: string;
+}
+
+/** Luxury standard benchmark item */
+export interface LogicStandard {
+  /** Standard category */
+  category: string;
+  /** What the standard requires */
+  requirement: string;
+  /** Current state assessment */
+  currentState: 'met' | 'partial' | 'missing' | 'unknown';
+  /** Gap description if not fully met */
+  gap?: string;
+}
+
+/** Action item for improvement */
+export interface LogicActionItem {
+  /** Unique identifier */
+  id: string;
+  /** Priority level */
+  priority: ActionPriority;
+  /** Action title */
+  title: string;
+  /** Detailed description */
+  description: string;
+  /** Which crack this addresses */
+  addressesCrack?: string;
+  /** Estimated effort */
+  effort?: 'trivial' | 'small' | 'medium' | 'large';
+}
+
+/** Result from think_logic tool - v5.0.0 Methodology Edition */
+export interface LogicAnalysisResult {
+  /** Analysis status */
+  status: 'success' | 'error';
+  /** Target that was analyzed */
+  target: string;
+  /** Depth used */
+  depth: LogicDepth;
+  /** Focus areas applied */
+  focus: LogicFocus[];
+  /** Tech stacks applied */
+  stack?: TechStack[];
+  /** Generated methodology for AI to follow */
+  methodology?: LogicMethodology;
+  /** Warnings during analysis */
+  warnings: string[];
+  /** Error message if status is error */
+  errorMessage?: string;
+}
+
+/** Single section in the methodology */
+export interface MethodologySection {
+  /** Section title with emoji */
+  title: string;
+  /** Purpose of this phase */
+  purpose: string;
+  /** Instructions/questions for AI to follow */
+  content: string[];
+}
+
+/** Methodology structure - instructions for AI, not analysis results */
+export interface LogicMethodology {
+  /** Task description */
+  task: string;
+  /** Methodology sections (phases) */
+  sections: MethodologySection[];
+  /** Stack-specific reminders (optional) */
+  stackReminders?: string[];
+}
+
