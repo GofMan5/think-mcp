@@ -31,7 +31,7 @@ export class StagnationService {
     const allHighlySimilar = similarities.every((s) => s >= adaptiveThreshold);
 
     if (allHighlySimilar && newThought.trim().length > 20) {
-      return `🛑 STAGNATION DETECTED: Your last ${STAGNATION_CHECK_COUNT} thoughts are ${Math.round(avgSimilarity * 100)}% similar (threshold: ${Math.round(adaptiveThreshold * 100)}% at depth ${thoughtHistory.length}). FORCE yourself to try a DIFFERENT approach or use 'extend_thought' with 'critique' to analyze why you're stuck.`;
+      return `🛑 STAGNATION: Last ${STAGNATION_CHECK_COUNT} thoughts ${Math.round(avgSimilarity * 100)}% similar. Different approach needed.`;
     }
 
     // Entropy check - detect low vocabulary diversity
@@ -40,7 +40,7 @@ export class StagnationService {
       recent.reduce((sum, t) => sum + calculateWordEntropy(t.thought), 0) / recent.length;
 
     if (newEntropy < MIN_ENTROPY_THRESHOLD && avgRecentEntropy < MIN_ENTROPY_THRESHOLD) {
-      return `🛑 LOW ENTROPY DETECTED: Your thoughts lack vocabulary diversity (entropy: ${newEntropy.toFixed(2)}). Try expressing your reasoning with different words or explore a completely new angle.`;
+      return `🛑 LOW ENTROPY: Vocabulary repetitive (${newEntropy.toFixed(2)}). Rephrase with different concepts.`;
     }
 
     // Check for declining confidence
@@ -54,7 +54,7 @@ export class StagnationService {
         recentWithConf.reduce((sum, t) => sum + (t.confidence ?? 0), 0) / recentWithConf.length;
 
       if (isDecreasing && avgRecent < 5) {
-        return `⚠️ CONFIDENCE DECLINING: Average confidence dropped to ${avgRecent.toFixed(1)}. Consider using 'extend_thought' to critique your approach.`;
+        return `⚠️ CONFIDENCE DROP: Avg ${avgRecent.toFixed(1)}. Use extend_thought:critique`;
       }
     }
 

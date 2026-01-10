@@ -24,14 +24,14 @@ const NUDGE_RULES = [
       }
       return false;
     },
-    nudge: 'Blocker unresolved. Address before continuing?',
+    nudge: 'Blocker unresolved. Fix first.',
   },
   {
     id: 'low_confidence',
     check: (input: ThoughtInput): boolean => {
       return (input.confidence ?? 10) < 5;
     },
-    nudge: 'Low confidence. Validate assumptions?',
+    nudge: 'Low confidence. Validate?',
   },
   {
     id: 'no_alternatives',
@@ -41,7 +41,7 @@ const NUDGE_RULES = [
       const recent = history.slice(-3);
       return recent.every(t => !t.alternatives || t.alternatives.length === 0);
     },
-    nudge: 'No alternatives explored. Tunnel vision?',
+    nudge: 'No alternatives. Tunnel vision?',
   },
   {
     id: 'complex_no_breakdown',
@@ -93,9 +93,9 @@ export class NudgeService {
     hasAlternatives: boolean,
     hasBlockers: boolean
   ): string | undefined {
-    if (hasBlockers) return 'Unresolved blockers in session.';
-    if (avgConfidence < 5) return 'Low avg confidence. Review weak points?';
-    if (thoughtCount >= 5 && !hasAlternatives) return 'No alternatives in session. Consider options?';
+    if (hasBlockers) return 'Blockers unresolved.';
+    if (avgConfidence < 5) return 'Low avg confidence.';
+    if (thoughtCount >= 5 && !hasAlternatives) return 'No alternatives in session.';
     return undefined;
   }
 }

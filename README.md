@@ -1,31 +1,58 @@
-# 🧠 Think MCP v5.0.0
+<div align="center">
 
-[![npm version](https://badge.fury.io/js/%40gofman3%2Fthink-mcp.svg)](https://www.npmjs.com/package/@gofman3/think-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+# 🧠 Think MCP
 
-MCP Server for structured sequential thinking. Helps LLMs break down complex problems into manageable steps with branching, revisions, cross-session learning, logic methodology generator, and proactive nudges.
+**Structured Sequential Thinking Server for LLMs**
 
-> 📝 **Base Prompt:** [pastebin.com/EJcJ3fJF](https://pastebin.com/EJcJ3fJF)
+[![npm version](https://img.shields.io/npm/v/@gofman3/think-mcp?style=flat-square&color=cb3837)](https://www.npmjs.com/package/@gofman3/think-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blueviolet?style=flat-square)](https://modelcontextprotocol.io/)
+
+<p align="center">
+  <b>Break down complex problems. Branch out ideas. Remember insights.</b><br>
+  Designed for LLMs to think deeper, smarter, and more efficiently.
+</p>
+
+[Quick Start](#-quick-start) • [Tools](#-tools-reference) • [Features](#-features) • [Changelog](#-changelog)
+
+</div>
+
+---
+
+## 📖 Overview
+
+**Think MCP** transforms how LLMs approach problem-solving. It's not just a tool; it's a cognitive framework that enables:
+- **Sequential Reasoning**: Step-by-step problem decomposition.
+- **Branching & Revision**: Ability to backtrack, fork thoughts, and correct mistakes.
+- **Deep Analysis**: Built-in methodology generator for rigorous code and logic auditing.
+- **Long-term Memory**: Cross-session recall of insights and dead ends.
+
+---
 
 ## ✨ Features
 
-- **6 Streamlined Tools** — `think`, `think_batch`, `think_done`, `think_recall`, `think_reset`, `think_logic`
-- **Logic Methodology Generator** — On-demand deep analysis framework for specific features
-- **Burst Thinking** — Submit up to 30 thoughts in one call
-- **Cross-Session Learning** — Insights from past sessions via `think_recall(scope:insights)`
-- **Proactive Nudges** — Short prompts for self-reflection when patterns detected
-- **Branching & Revisions** — Explore alternatives, fix mistakes
-- **Dead Ends Tracking** — Remember rejected paths
-- **Fuzzy Recall** — Search through thought history with Fuse.js
-- **Session Persistence** — Auto-save/restore with 24h TTL
+| Feature | Description |
+| :--- | :--- |
+| **🚀 Efficient Thinking** | **Imperative Prompts (v5.1)** reduce token usage by ~55% using IF/THEN logic. |
+| **⚡️ Burst Mode** | Submit up to **30 thoughts** in a single API call with `think_batch`. |
+| **🧠 Methodology Generator** | On-demand deep analysis frameworks (Chain Mapping, Crack Hunting, etc.) via `think_logic`. |
+| **💾 Smart Memory** | Cross-session learning via `think_recall` and auto-save with 24h retention. |
+| **🔔 Nudge System** | Proactive micro-prompts to detect low confidence, tunnel vision, or missed steps. |
+| **🌳 Branching** | Explore alternative paths without losing context. |
+
+---
 
 ## 🚀 Quick Start
+
+### Installation
 
 ```bash
 npx @gofman3/think-mcp
 ```
 
 ### MCP Configuration
+
+Add this to your MCP settings file:
 
 ```json
 {
@@ -38,47 +65,51 @@ npx @gofman3/think-mcp
 }
 ```
 
-## 🛠️ Tools
+---
 
-### `think`
-Add a single thought to the reasoning chain.
+## 🛠️ Tools Reference
+
+### 1. `think`
+*The core unit of reasoning.* Adds a single thought to the chain.
 
 ```typescript
 {
-  thought: string,
-  thoughtNumber: number,
-  totalThoughts: number,
-  nextThoughtNeeded: boolean,
-  confidence?: number,        // 1-10
-  goal?: string,              // Set in first thought
-  subSteps?: string[],        // Micro-plan (max 5)
-  alternatives?: string[],    // Quick comparison (max 5)
-  quickExtension?: {
-    type: 'critique' | 'elaboration' | 'correction' | 'innovation' | 'optimization' | 'polish',
+  thought: string,             // The reasoning content
+  thoughtNumber: number,       // Current step index
+  totalThoughts: number,       // Estimated total steps
+  nextThoughtNeeded: boolean,  // Is the chain complete?
+  confidence?: number,         // Score 1-10
+  goal?: string,               // Required for the first thought
+  subSteps?: string[],         // Breakdown of current step (max 5)
+  alternatives?: string[],     // Other approaches considered (max 5)
+  quickExtension?: {           // Immediate micro-actions
+    type: 'critique' | 'elaboration' | 'correction' | 'innovation' | 'polish',
     content: string,
     impact?: 'low' | 'medium' | 'high' | 'blocker'
   },
-  isRevision?: boolean,
-  revisesThought?: number,
-  branchFromThought?: number,
-  branchId?: string
+  isRevision?: boolean,        // Is this correcting a previous step?
+  revisesThought?: number,     // Which step is being fixed?
+  branchId?: string            // For branching paths
 }
 ```
 
-### `think_batch`
-Submit complete reasoning chain in one call (1-30 thoughts).
+### 2. `think_batch`
+*High-velocity reasoning.* Submit a complete chain (1-30 thoughts) at once.
+
+> **⚠️ Constraints**
+> - `IF similarity > 60%` → Reject ("Stagnation")
+> - `IF thought < 50 chars` → Reject ("Too short")
+> - `IF avg_confidence < 4` → Warning issued
 
 ```typescript
 {
   goal: string,               // Min 10 chars
-  thoughts: [{
+  thoughts: Array<{           // List of thought objects
     thoughtNumber: number,
-    thought: string,          // Min 50 chars
+    thought: string,          // 50-1000 chars
     confidence?: number,
-    subSteps?: string[],
-    alternatives?: string[],
-    extensions?: [{ type, content, impact }]
-  }],
+    // ... other standard fields
+  }>,
   consolidation?: {
     winningPath: number[],
     summary: string,
@@ -87,161 +118,93 @@ Submit complete reasoning chain in one call (1-30 thoughts).
 }
 ```
 
-### `think_done`
-Finish session with verification and optional export.
+### 3. `think_logic`
+*The Architect.* Generates a strict thinking methodology for complex analysis.
+
+**Output Phases:** `CHAIN MAPPING` → `CRACK HUNTING` → `STANDARD BENCHMARK` → `ACTION PLANNING`
 
 ```typescript
 {
-  winningPath: number[],
-  summary: string,
-  verdict: 'ready' | 'needs_more_work',
-  exportReport?: 'markdown' | 'json',
-  includeMermaid?: boolean
+  target: string,              // The subject of analysis (Min 10 chars)
+  depth?: 'quick' | 'standard' | 'deep',
+  focus?: ('security' | 'performance' | 'reliability' | 'ux' | 'data-flow')[],
+  stack?: ('nestjs' | 'react' | 'redis' | 'nextjs' | /* etc */)[]
 }
 ```
 
-### `think_recall`
-Search current session or past insights.
+### 4. `think_recall`
+*The Memory Bank.* Search current session or past insights.
+
+**Best Practices:**
+- `BEFORE complex_task` → Check `scope: 'insights'`
+- `IF repeating_logic` → Check for dead ends
+- `IF unsure` → Verify context
 
 ```typescript
 {
   query: string,
-  scope?: 'session' | 'insights',  // Default: session
+  scope?: 'session' | 'insights',
   searchIn?: 'thoughts' | 'extensions' | 'alternatives' | 'all',
-  limit?: number,
-  threshold?: number
+  limit?: number
 }
 ```
 
-### `think_reset`
-Clear session and start fresh.
-
-### `think_logic`
-Generate thinking methodology for deep analysis of specific features/flows.
-
-```typescript
-{
-  target: string,              // What to analyze (min 10 chars)
-  context?: string,            // Additional context
-  depth?: 'quick' | 'standard' | 'deep',
-  focus?: ('security' | 'performance' | 'reliability' | 'ux' | 'architecture' | 'data-flow')[],
-  stack?: ('nestjs' | 'prisma' | 'ts-rest' | 'react' | 'redis' | 'zod' | 'trpc' | 'nextjs')[]
-}
-```
-
-**Output:** 4-phase methodology (Chain Mapping → Crack Hunting → Standard Benchmark → Action Planning) that guides AI thinking, not ready answers.
-
-**When to use:**
-- Deep dive into specific feature/bug
-- Different depth levels for different tasks
-- Working with multiple tech stacks
-
-**vs Steering Prompt:**
-| | Steering Prompt | think_logic |
-|---|---|---|
-| Delivery | Automatic every request | On-demand call |
-| Use case | Constant quality baseline | Deep dive into specific code |
-| Flexibility | Static | depth/focus/stack params |
-
-## 💡 Nudge System (v4.6)
-
-When no warnings are present, the server returns short prompts based on detected patterns:
-
-| Pattern | Nudge |
-|---------|-------|
-| confidence < 5 | "Low confidence. Validate assumptions?" |
-| 3+ thoughts without alternatives | "No alternatives explored. Tunnel vision?" |
-| Complex goal without subSteps | "Complex goal, no breakdown. Decompose?" |
-| Unresolved blocker | "Blocker unresolved. Address before continuing?" |
-
-Nudges appear only when there's no other systemAdvice — avoiding noise.
-
-## 📊 Complexity Budget
-
-| Task | Thoughts | Tool |
-|------|----------|------|
-| Simple | 0-2 | Skip or `think` |
-| Medium | 3-7 | `think` step-by-step |
-| Complex | 8-30 | `think_batch` |
-
-## 🔄 Changelog
-
-### v5.0.0
-- **New:** `think_logic` — Logic Methodology Generator for deep analysis
-- **New:** 4-phase methodology (Chain Mapping, Crack Hunting, Standard Benchmark, Action Planning)
-- **New:** Focus areas (security, performance, reliability, ux, architecture, data-flow)
-- **New:** Stack-specific reminders (nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs)
-- **Philosophy:** Teaches AI HOW to think, not WHAT to find
-
-### v4.6.0
-- **New:** NudgeService — proactive micro-prompts for self-reflection
-- **New:** Nudge field in response (💡 icon)
-- **Improved:** Nudges only appear when no other warnings present
-
-### v4.5.0
-- **Breaking:** Renamed tools (`sequentialthinking` → `think`, etc.)
-- **New:** Cross-session insights via `think_recall(scope:insights)`
-- **Improved:** Compact output, lazy tree generation
-
-### v4.1.0
-- **New:** `submit_thinking_session` (Burst Thinking)
-- **New:** Atomic validation (sequence, stagnation, entropy)
-
-### v3.4.0
-- **New:** Fuzzy recall with Fuse.js
-- **New:** Dead ends tracking
-- **New:** Session TTL (24h)
-
-## 📄 License
-
-MIT
+### 5. `think_done` & `think_reset`
+- **`think_done`**: Finalize session. Validates gaps, blockers, and confidence levels.
+- **`think_reset`**: Wipe the slate clean. *(Use only if task context changes completely).*
 
 ---
 
-## 🎯 How to Use (for humans)
+## 💡 Intelligent Systems
 
-### Simple task — DON'T USE TOOLS
-```
-You: "Add console.log for debugging"
-AI: *just does it, no thinking needed*
-```
+### The Nudge System
+*The server watches your back.*
 
-### Medium/Complex task — FULL WORKFLOW
+| Trigger Pattern | System Nudge |
+| :--- | :--- |
+| `confidence < 5` | "Low confidence. Validate?" |
+| `3+ thoughts` w/o alternatives | "No alternatives. Tunnel vision?" |
+| Complex goal w/o subSteps | "Complex goal, no breakdown. Decompose?" |
+| Unresolved blocker | "Blocker unresolved. Fix first." |
 
-**Example prompt:**
-```
-Working directory: C:/Projects/my-backend
+### Complexity Budget
+*Recommended tool usage based on task size.*
 
-1. Study folders src/auth/ and src/utils/
-2. use think_batch — analyze architecture and edge cases
-3. use task_spec — create specification with tasks
+| Task Difficulty | Thoughts | Recommended Tool |
+| :--- | :--- | :--- |
+| **Simple** | 0-2 | *Skip (Direct Answer)* |
+| **Medium** | 3-7 | `think` (Step-by-step) |
+| **Complex** | 8-30 | `think_batch` (Burst mode) |
 
-Goal: "Build robust password validation backend logic"
+---
 
-Requirements:
-- Minimum 8 characters
-- At least 1 digit, 1 special character
-- Check against leaked passwords (haveibeenpwned API)
-- Rate limiting on validation
-```
+## 🔄 Changelog
 
-**What happens:**
-1. AI studies specified folders
-2. `think_batch` — thinks through edge cases (what if API is down? what about unicode passwords?)
-3. `task_spec` — creates spec with tasks in `.gofman3/specs/password-validation/`
-4. You'll see files:
-   - `requirements.md` — what we're building
-   - `design.md` — how we're building  
-   - `tasks.md` — progress (auto-updates!)
+<details open>
+<summary><b>v5.1.0 (Current)</b></summary>
 
-### Track progress
-```
-Show task_board
-```
-AI shows Kanban board — what's done, in progress, blocked.
+- **Imperative Prompts**: Switched to IF/THEN style instructions.
+- **Performance**: ~55% Token Reduction per request.
+- **Optimization**: Faster parsing, less LLM overhead.
+</details>
 
-### If AI is stuck
-```
-use think_recall query: "password validation" scope: insights
-```
-Searches past sessions for similar solutions.
+<details>
+<summary><b>v5.0.0</b></summary>
+
+- **New Tool**: `think_logic` for generating methodologies.
+- **Framework**: Added 4-phase analysis (Mapping, Cracking, Benchmarking, Planning).
+</details>
+
+<details>
+<summary><b>v4.x.x History</b></summary>
+
+- **v4.6.0**: Added NudgeService for proactive prompts.
+- **v4.5.0**: Renamed to `think`, added Cross-session insights.
+- **v4.1.0**: Introduced Burst Thinking (`think_batch`).
+</details>
+
+---
+
+<div align="center">
+  <sub>MIT License • Created by @gofman3</sub>
+</div>

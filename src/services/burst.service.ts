@@ -93,10 +93,10 @@ export class BurstService {
 
     for (const t of thoughts) {
       if (t.thought.length < BURST_LIMITS.minThoughtLength) {
-        errors.push(`Thought #${t.thoughtNumber} too short: ${t.thought.length} < ${BURST_LIMITS.minThoughtLength} chars`);
+        errors.push(`#${t.thoughtNumber} too short: ${t.thought.length} < ${BURST_LIMITS.minThoughtLength}`);
       }
       if (t.thought.length > BURST_LIMITS.maxThoughtLength) {
-        warnings.push(`Thought #${t.thoughtNumber} truncated: ${t.thought.length} > ${BURST_LIMITS.maxThoughtLength} chars`);
+        warnings.push(`#${t.thoughtNumber} truncated: ${t.thought.length} > ${BURST_LIMITS.maxThoughtLength}`);
       }
 
       totalLength += Math.min(t.thought.length, BURST_LIMITS.maxThoughtLength);
@@ -111,7 +111,7 @@ export class BurstService {
       if (t.isRevision && t.revisesThought !== undefined) {
         const targetExists = thoughts.some(other => other.thoughtNumber === t.revisesThought);
         if (!targetExists) {
-          errors.push(`Revision #${t.thoughtNumber} targets non-existent thought #${t.revisesThought}`);
+          errors.push(`Revision #${t.thoughtNumber} targets non-existent #${t.revisesThought}`);
         }
       }
 
@@ -119,7 +119,7 @@ export class BurstService {
       if (t.branchFromThought !== undefined) {
         const sourceExists = thoughts.some(other => other.thoughtNumber === t.branchFromThought);
         if (!sourceExists) {
-          errors.push(`Branch in thought #${t.thoughtNumber} from non-existent thought #${t.branchFromThought}`);
+          errors.push(`Branch #${t.thoughtNumber} from non-existent #${t.branchFromThought}`);
         }
       }
     }
@@ -139,7 +139,7 @@ export class BurstService {
       stagnationScore = comparisons > 0 ? totalSimilarity / comparisons : 0;
 
       if (stagnationScore > BURST_LIMITS.maxStagnationScore) {
-        errors.push(`Stagnation detected: ${(stagnationScore * 100).toFixed(0)}% avg similarity > ${BURST_LIMITS.maxStagnationScore * 100}% threshold`);
+        errors.push(`Stagnation: ${(stagnationScore * 100).toFixed(0)}% similarity > ${BURST_LIMITS.maxStagnationScore * 100}%`);
       }
     }
 
@@ -150,11 +150,11 @@ export class BurstService {
 
     // v5.0.1: Skip entropy warning for small batches (< 5 thoughts)
     if (avgEntropy < BURST_LIMITS.minAvgEntropy && thoughts.length >= 5) {
-      warnings.push(`Low vocabulary diversity: ${avgEntropy.toFixed(2)} < ${BURST_LIMITS.minAvgEntropy} threshold`);
+      warnings.push(`Low diversity: ${avgEntropy.toFixed(2)} < ${BURST_LIMITS.minAvgEntropy}`);
     }
 
     if (avgConfidence < BURST_LIMITS.minAvgConfidence && confidenceCount > 0) {
-      warnings.push(`Low average confidence: ${avgConfidence.toFixed(1)} < ${BURST_LIMITS.minAvgConfidence} threshold`);
+      warnings.push(`Low confidence: ${avgConfidence.toFixed(1)} < ${BURST_LIMITS.minAvgConfidence}`);
     }
 
     // === PHASE 6: Consolidation Validation ===
@@ -222,7 +222,7 @@ export class BurstService {
       }
 
       if (pathGaps.length > 0) {
-        warnings.push(`Path has gaps (${pathGaps.join(', ')}). Consider using branches or including intermediate thoughts.`);
+        warnings.push(`Path gaps: ${pathGaps.join(', ')}. Use branches or include intermediate thoughts.`);
       }
     }
 
@@ -235,7 +235,7 @@ export class BurstService {
           if (hasBlocker) {
             const hasRevision = thoughts.some(t => t.isRevision && t.revisesThought === num);
             if (!hasRevision) {
-              errors.push(`Unaddressed blocker in thought #${num} - cannot mark as ready`);
+              errors.push(`Blocker in #${num} unresolved - cannot mark ready`);
             }
           }
         }

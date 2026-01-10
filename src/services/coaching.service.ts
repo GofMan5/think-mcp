@@ -71,7 +71,7 @@ export class CoachingService {
       const prevThought = sessionThoughts[thoughtCount - 2];
       if (prevThought.subSteps && prevThought.subSteps.length > 0) {
         advices.push(
-          `📋 SELF-CHECK: Previous thought #${prevThought.thoughtNumber} had ${prevThought.subSteps.length} sub-steps: [${prevThought.subSteps.join(', ')}]. Did you complete them all?`
+          `📋 SELF-CHECK: #${prevThought.thoughtNumber} had ${prevThought.subSteps.length} sub-steps. All completed?`
         );
       }
     }
@@ -84,7 +84,7 @@ export class CoachingService {
       for (const branchId of branches.keys()) {
         if (!recentBranchIds.has(branchId)) {
           advices.push(
-            `🌿 FORGOTTEN BRANCH: You have an open branch "${branchId}" that hasn't been touched in 3+ thoughts. Consider integrating it into your solution or explicitly closing it via consolidate.`
+            `🌿 FORGOTTEN: Branch "${branchId}" untouched 3+ thoughts. Integrate or close.`
           );
           break;
         }
@@ -100,7 +100,7 @@ export class CoachingService {
 
       if (avgEntropy < MIN_ENTROPY_THRESHOLD || (isDecreasing && entropies[2] < 0.3)) {
         advices.push(
-          `📉 ENTROPY DECLINING: Your recent thoughts show decreasing vocabulary diversity (avg: ${avgEntropy.toFixed(2)}). This may indicate repetitive thinking. Try expressing your reasoning with different words or explore a new angle.`
+          `📉 ENTROPY: Vocabulary diversity low (${avgEntropy.toFixed(2)}). Rephrase with different concepts.`
         );
       }
     }
@@ -116,15 +116,15 @@ export class CoachingService {
 
         if (pressureLevel === 1) {
           advices.push(
-            '💡 LATERAL THINKING: Your reasoning appears too linear. Consider using extend_thought with "critique" or create a branch.'
+            '💡 LINEAR: Consider extend_thought:critique or branch.'
           );
         } else if (pressureLevel === 2) {
           advices.push(
-            '⚠️ LATERAL WARNING: Still no branches or critiques. STRONGLY consider using extend_thought with "assumption_testing".'
+            '⚠️ LINEAR: STRONGLY use extend_thought:assumption_testing.'
           );
         } else {
           advices.push(
-            `🚨 CRITICAL: ${thoughtCount} thoughts with ZERO lateral exploration. STOP and critique your approach.`
+            `🚨 CRITICAL: ${thoughtCount} thoughts, ZERO lateral. STOP and critique.`
           );
         }
       }
@@ -134,17 +134,11 @@ export class CoachingService {
     if (thoughtCount >= MAX_THOUGHTS_BUDGET) {
       const overBudget = thoughtCount - MAX_THOUGHTS_BUDGET;
       if (overBudget === 0) {
-        advices.push(
-          `💰 COMPLEXITY BUDGET: You've reached ${MAX_THOUGHTS_BUDGET} thoughts. Consider calling consolidate_and_verify to synthesize your reasoning.`
-        );
+        advices.push(`💰 BUDGET: ${MAX_THOUGHTS_BUDGET} thoughts. Consolidate.`);
       } else if (overBudget <= 3) {
-        advices.push(
-          `⚠️ OVER BUDGET: ${thoughtCount} thoughts without consolidation. Time to wrap up - call consolidate_and_verify NOW.`
-        );
+        advices.push(`⚠️ OVER BUDGET: ${thoughtCount} thoughts. Consolidate NOW.`);
       } else {
-        advices.push(
-          `🚨 ANALYSIS PARALYSIS: ${thoughtCount} thoughts is excessive. STOP adding thoughts and call consolidate_and_verify immediately!`
-        );
+        advices.push(`🚨 PARALYSIS: ${thoughtCount} thoughts. STOP. Consolidate immediately.`);
       }
     }
 
@@ -185,7 +179,7 @@ export class CoachingService {
         (trigger) => lastContent.includes(trigger) || allContent.includes(trigger)
       );
       if (hasOptimizationTrigger) {
-        return '🎯 COACH: Detected optimization opportunity (TODO/tech debt/performance mention). Consider using extend_thought with type "optimization" to analyze Before/After improvements.';
+        return '🎯 COACH: TODO/perf detected. Use extend_thought:optimization';
       }
     }
 
@@ -195,7 +189,7 @@ export class CoachingService {
         lastContent.includes(trigger)
       ).length;
       if (uncertaintyCount >= 2) {
-        return '🎯 COACH: Detected uncertain language ("maybe", "probably", "I think"). Consider using extend_thought with type "assumption_testing" to validate your hypotheses.';
+        return '🎯 COACH: Uncertain language. Use extend_thought:assumption_testing';
       }
     }
 
@@ -205,7 +199,7 @@ export class CoachingService {
       const hasHighConfidence =
         lastThought.confidence && lastThought.confidence >= POLISH_THRESHOLD_CONFIDENCE;
       if (isNearEnd && hasHighConfidence) {
-        return '🎯 COACH: You\'re near completion with high confidence. Consider using extend_thought with type "polish" to check edge cases, typing, and documentation before finalizing.';
+        return '🎯 COACH: High confidence. Use extend_thought:polish';
       }
     }
 
@@ -213,7 +207,7 @@ export class CoachingService {
     if (!existingExtensions.has('innovation') && sessionThoughts.length >= INNOVATION_THRESHOLD_THOUGHTS) {
       const hasBranches = sessionThoughts.some((t) => t.branchFromThought !== undefined);
       if (!hasBranches) {
-        return '🎯 COACH: Long session without exploring alternatives. Consider using extend_thought with type "innovation" to find new directions or "white spots" in your solution.';
+        return '🎯 COACH: Long session. Use extend_thought:innovation';
       }
     }
 
@@ -229,7 +223,7 @@ export class CoachingService {
     // Short thought detection
     if (input.thought.length < MIN_THOUGHT_LENGTH && input.nextThoughtNeeded) {
       this.addAdviceWithCooldown(
-        `⚠️ SHORT THOUGHT: Only ${input.thought.length} chars. Expand with implementation details or potential risks.`,
+        `⚠️ SHORT: ${input.thought.length} chars. Expand.`,
         nudges
       );
     }
@@ -237,7 +231,7 @@ export class CoachingService {
     // Low confidence nudge
     if (input.confidence && input.confidence < LOW_CONFIDENCE_THRESHOLD) {
       this.addAdviceWithCooldown(
-        `💡 LOW CONFIDENCE (${input.confidence}/10): Consider using quickExtension with type "critique" or "assumption_testing" to explore why you're uncertain.`,
+        `💡 LOW (${input.confidence}/10): Use quickExtension:critique`,
         nudges
       );
     }
@@ -247,7 +241,7 @@ export class CoachingService {
       const hasCritique = sessionThoughts.some((t) => t.extensions?.some((e) => e.type === 'critique'));
       if (!hasCritique) {
         this.addAdviceWithCooldown(
-          `🧐 NO SELF-CRITIQUE: ${sessionThoughts.length} thoughts without challenging your assumptions. Use quickExtension: {type: "critique", content: "..."} to validate your approach.`,
+          `🧐 NO CRITIQUE: ${sessionThoughts.length} thoughts. Use quickExtension:critique`,
           nudges
         );
       }
@@ -256,7 +250,7 @@ export class CoachingService {
     // Smart pruning reminder
     if (sessionThoughts.length >= SMART_PRUNING_THRESHOLD) {
       this.addAdviceWithCooldown(
-        `🧹 LONG SESSION (${sessionThoughts.length} thoughts): Context is being auto-pruned. Consider consolidate_and_verify soon.`,
+        `🧹 LONG (${sessionThoughts.length} thoughts): Auto-pruning. Consolidate soon.`,
         nudges
       );
     }
@@ -268,7 +262,7 @@ export class CoachingService {
       input.confidence < NEAR_LIMIT_CONFIDENCE_THRESHOLD
     ) {
       this.addAdviceWithCooldown(
-        `⚠️ NEAR LIMIT: You're at thought ${input.thoughtNumber}/${input.totalThoughts} with low confidence (${input.confidence}/10). Consider increasing totalThoughts or using needsMoreThoughts: true.`,
+        `⚠️ NEAR LIMIT: ${input.thoughtNumber}/${input.totalThoughts}, confidence ${input.confidence}/10.`,
         nudges
       );
     }
@@ -296,7 +290,7 @@ export class CoachingService {
       const totalSteps = allSubSteps.reduce((sum, s) => sum + s.steps.length, 0);
       const thoughtsWithSteps = allSubSteps.map((s) => `#${s.thoughtNum}`).join(', ');
       auditWarnings.push(
-        `📋 SUBSTEPS AUDIT: You defined ${totalSteps} sub-steps in thoughts ${thoughtsWithSteps}. Before finishing, verify all were addressed.`
+        `📋 SUBSTEPS: ${totalSteps} defined in ${thoughtsWithSteps}. Verify completion.`
       );
     }
 
@@ -320,7 +314,7 @@ export class CoachingService {
 
     if (avgLength < requiredDepth) {
       auditWarnings.push(
-        `🔬 DEPTH AUDIT: Average thought length (${Math.round(avgLength)} chars) is below threshold for ${complexityLevel} tasks (${requiredDepth} chars). Consider adding 'elaboration' extensions for key thoughts.`
+        `🔬 DEPTH: ${Math.round(avgLength)} chars < ${requiredDepth} for ${complexityLevel} task.`
       );
     }
 
@@ -344,15 +338,13 @@ export class CoachingService {
 
     if (unresolvedBlockers.length > 0) {
       auditWarnings.push(
-        `🛑 BLOCKER AUDIT: Thoughts #${unresolvedBlockers.join(', ')} have unresolved critical issues. Create revisions before calling consolidate_and_verify.`
+        `🛑 BLOCKERS: #${unresolvedBlockers.join(', ')} unresolved.`
       );
     }
 
     if (auditWarnings.length > 0) {
-      auditWarnings.unshift('⚡ PRE-CONSOLIDATION AUDIT (finishing session):');
-      auditWarnings.push(
-        '💡 TIP: Address these items or call consolidate_and_verify to formally close the session.'
-      );
+      auditWarnings.unshift('⚡ PRE-CONSOLIDATION AUDIT:');
+      auditWarnings.push('💡 Address items or call think_done.');
     }
 
     return auditWarnings.length > 0 ? auditWarnings.join('\n') : undefined;

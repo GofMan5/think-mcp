@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Think Module MCP Server v4.7.0
+ * Think Module MCP Server v5.1.0
  * Streamlined thinking tools: 6 tools
  * 
+ * v5.1.0: Imperative prompts (IF/THEN style, -55% tokens)
  * v4.7.0: Added think_logic for deep logical analysis
  * v4.6.0: Added NudgeService for proactive micro-prompts
  * 
@@ -25,26 +26,20 @@ const thinkingService = new ThinkingService();
 
 const server = new McpServer({
   name: 'think-module-server',
-  version: '4.7.0',
+  version: '5.1.0',
 });
 
 // ============================================
 // 1. THINK - Single thought with optional inline extension
 // ============================================
 
-const THINK_DESCRIPTION = `Add a thought to the reasoning chain.
+const THINK_DESCRIPTION = `Add thought to reasoning chain.
 
-Use for:
-- Complex multi-step problems
-- Planning with room for revision
-- Analysis that might need course correction
+Use for: Complex problems, planning, analysis needing revision.
 
-Features:
-- subSteps: Micro-action plan (max 5)
-- alternatives: Quick options comparison
-- quickExtension: Inline critique/elaboration (replaces extend_thought tool)
+Features: subSteps (max 5), alternatives, quickExtension (inline critique).
 
-Returns progress bar, confidence, and next action hint.`;
+Returns: progress bar, confidence, next action hint.`;
 
 const thinkSchema = {
   thought: z.string().describe('Your thinking step'),
@@ -132,17 +127,16 @@ server.registerTool('think', { title: 'Think', description: THINK_DESCRIPTION, i
 // 2. THINK_BATCH - Bulk submit thoughts
 // ============================================
 
-const THINK_BATCH_DESCRIPTION = `Submit multiple thoughts at once (Burst Thinking).
+const THINK_BATCH_DESCRIPTION = `Burst Thinking - submit complete reasoning chain in one call.
 
-Use when you have a complete reasoning chain ready.
-Reduces N round-trips to 1.
+Input: goal (min 10 chars), thoughts [1-30], consolidation (optional).
 
-Input:
-- goal: Session goal (required)
-- thoughts: Array of 1-30 thoughts
-- consolidation: Optional {winningPath, summary, verdict}
+Constraints:
+- IF similarity > 60% THEN reject "Stagnation"
+- IF thought < 50 chars THEN reject "Too short"
+- IF avg_confidence < 4 THEN warn
 
-Validation is atomic - all or nothing.`;
+Validation: atomic (all or nothing).`;
 
 const burstExtensionSchema = z.object({
   type: z.enum(['critique', 'elaboration', 'correction', 'alternative_scenario', 'assumption_testing', 'innovation', 'optimization', 'polish']),
@@ -209,17 +203,16 @@ server.registerTool('think_batch', { title: 'Think Batch', description: THINK_BA
 // 3. THINK_DONE - Consolidate and optionally export
 // ============================================
 
-const THINK_DONE_DESCRIPTION = `Finish thinking session: verify logic and optionally export.
+const THINK_DONE_DESCRIPTION = `Finish session with verification.
 
 MANDATORY before final answer on complex problems.
 
-Checks:
-- Low confidence thoughts in path
-- Unaddressed blockers
-- Ignored thoughts ratio
+Validation:
+- IF path_has_gaps THEN reject
+- IF blocker_unresolved THEN reject
+- IF confidence < 5 in path THEN warn
 
-Options:
-- exportReport: Get markdown/json report (replaces export_session)`;
+Options: exportReport (markdown|json).`;
 
 const thinkDoneSchema = {
   winningPath: z.array(z.number().int().min(1)).describe('Thought numbers leading to solution'),
@@ -282,13 +275,14 @@ server.registerTool('think_done', { title: 'Think Done', description: THINK_DONE
 // 4. THINK_RECALL - Unified search (session + insights)
 // ============================================
 
-const THINK_RECALL_DESCRIPTION = `Search through thoughts or past insights.
+const THINK_RECALL_DESCRIPTION = `Search session thoughts or past insights.
 
-Scopes:
-- session: Current session thoughts (default)
-- insights: Past successful solutions (cross-session)
+Scopes: session (default), insights (cross-session).
 
-Use before starting complex tasks to find relevant past decisions.`;
+Mandatory usage:
+- BEFORE complex_task: check insights for past patterns
+- IF repeating_logic: check session for dead ends
+- IF unsure_about_fact: verify established context`;
 
 const thinkRecallSchema = {
   query: z.string().min(2).describe('Search query (fuzzy matching)'),
@@ -364,14 +358,15 @@ server.registerTool('think_recall', { title: 'Think Recall', description: THINK_
 // 5. THINK_RESET - Clear session
 // ============================================
 
-const THINK_RESET_DESCRIPTION = `Clear thinking session and start fresh.
+const THINK_RESET_DESCRIPTION = `Clear session. Irreversible.
 
-Use when:
-- Starting a NEW problem
-- Previous chain is irrelevant
+TRIGGER:
+- IF new_task_unrelated THEN reset
+- IF all_paths_failed THEN reset
 
-⚠️ Irreversible. All thoughts will be lost.
-Note: Auto-resets on thought #1.`;
+DO NOT RESET:
+- IF user_says "tweak/fix/expand" THEN continue
+- IF mid_execution THEN use branchFromThought instead`;
 
 server.registerTool('think_reset', { title: 'Think Reset', description: THINK_RESET_DESCRIPTION, inputSchema: {} },
   async () => {
@@ -395,31 +390,17 @@ import type { LogicDepth, LogicFocus, TechStack } from './types/thought.types.js
 
 const logicService = new LogicService();
 
-const THINK_LOGIC_DESCRIPTION = `Deep logical analysis of any task, feature, or system.
+const THINK_LOGIC_DESCRIPTION = `Generate thinking methodology for code analysis.
 
-v5.0.0 - METHODOLOGY EDITION
-This tool generates a THINKING FRAMEWORK for AI to follow, not pre-computed results.
-It provides INSTRUCTIONS on how to analyze code, not the analysis itself.
+Output: 4-phase framework (not pre-computed results).
+1. CHAIN MAPPING: Trace data flow
+2. CRACK HUNTING: Find break points
+3. STANDARD BENCHMARK: Compare to production standards
+4. ACTION PLANNING: Document fixes
 
-Output is a structured methodology with 4 phases:
-1. CHAIN MAPPING: Instructions to trace data flow step-by-step
-2. CRACK HUNTING: Questions to ask about each step (not pattern-matched answers)
-3. STANDARD BENCHMARK: Checklist to compare against Google-level standards
-4. ACTION TEMPLATE: How to document and fix found issues
-
-Use for:
-- Pre-implementation analysis ("How should I think about this?")
-- Code review preparation ("What questions should I ask?")
-- Architecture validation ("What standards should I check?")
-- Bug investigation ("How do I trace this issue?")
-
-Depth levels:
-- quick: Essential checks only (fast overview)
-- standard: Comprehensive methodology (default)
-- deep: Exhaustive with all standards and stack-specific checks
-
-Focus areas: security, performance, reliability, ux, architecture, data-flow
-Tech stacks: nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs`;
+Depth: quick | standard | deep
+Focus: security, performance, reliability, ux, architecture, data-flow
+Stack: nestjs, prisma, ts-rest, react, redis, zod, trpc, nextjs`;
 
 const thinkLogicSchema = {
   target: z.string().min(10).describe('What to analyze (feature, flow, component, system description)'),
@@ -462,7 +443,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Think Module MCP Server v4.7.0 running on stdio');
+  console.error('Think Module MCP Server v5.1.0 running on stdio');
 }
 
 main().catch((error) => {

@@ -31,7 +31,7 @@ export class ValidationService {
       if (!targetThought) {
         return {
           valid: false,
-          warning: `🚫 INVALID REVISION: Cannot revise thought #${input.revisesThought} - it doesn't exist in current session. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ')}`,
+          warning: `🚫 INVALID: Cannot revise #${input.revisesThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ')}`,
         };
       }
 
@@ -40,7 +40,7 @@ export class ValidationService {
       if (similarity > 0.85) {
         return {
           valid: false,
-          warning: `⚠️ SHALLOW REVISION: Your revision is ${Math.round(similarity * 100)}% similar to the original. A meaningful revision should substantially change the content. Rewrite with more significant changes.`,
+          warning: `⚠️ SHALLOW: ${Math.round(similarity * 100)}% similar. Rewrite substantially.`,
         };
       }
 
@@ -53,7 +53,7 @@ export class ValidationService {
         if (circularSimilarity > 0.8) {
           return {
             valid: false,
-            warning: `🔄 CIRCULAR REVISION DETECTED: Your revision is ${Math.round(circularSimilarity * 100)}% similar to thought #${earlier.thoughtNumber}. You may be going in circles. Try a genuinely new approach.`,
+            warning: `🔄 CIRCULAR: ${Math.round(circularSimilarity * 100)}% similar to #${earlier.thoughtNumber}. New approach needed.`,
           };
         }
       }
@@ -73,7 +73,7 @@ export class ValidationService {
     if (input.thoughtNumber > expectedNext) {
       return {
         valid: false,
-        warning: `⚠️ Sequence break detected! Expected step ${expectedNext}, got ${input.thoughtNumber}. Don't skip steps - think through each one.`,
+        warning: `⚠️ SEQUENCE: Expected #${expectedNext}, got #${input.thoughtNumber}.`,
       };
     }
 
@@ -92,7 +92,7 @@ export class ValidationService {
     const exists = sessionThoughts.some((t) => t.thoughtNumber === input.thoughtNumber);
 
     if (exists) {
-      return `🚫 REJECTED: Thought #${input.thoughtNumber} already exists in this session. Use isRevision: true to revise it, or extend_thought to add critique/elaboration.`;
+      return `🚫 REJECTED: #${input.thoughtNumber} exists. Use isRevision:true or extend_thought.`;
     }
     return undefined;
   }
@@ -108,7 +108,7 @@ export class ValidationService {
     const sourceExists = sessionThoughts.some((t) => t.thoughtNumber === input.branchFromThought);
 
     if (!sourceExists) {
-      return `🚫 INVALID BRANCH: Cannot branch from thought #${input.branchFromThought} - it doesn't exist in current session. Available thoughts: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ') || 'none'}`;
+      return `🚫 INVALID: Cannot branch from #${input.branchFromThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ') || 'none'}`;
     }
     return undefined;
   }
