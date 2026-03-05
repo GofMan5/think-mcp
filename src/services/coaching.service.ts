@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CoachingService - Proactive coaching and lateral thinking triggers
  * Stateful service - owns recentAdvices for cooldown tracking
  */
@@ -71,7 +71,7 @@ export class CoachingService {
       const prevThought = sessionThoughts[thoughtCount - 2];
       if (prevThought.subSteps && prevThought.subSteps.length > 0) {
         advices.push(
-          `📋 SELF-CHECK: #${prevThought.thoughtNumber} had ${prevThought.subSteps.length} sub-steps. All completed?`
+          `ðŸ“‹ SELF-CHECK: #${prevThought.thoughtNumber} had ${prevThought.subSteps.length} sub-steps. All completed?`
         );
       }
     }
@@ -84,7 +84,7 @@ export class CoachingService {
       for (const branchId of branches.keys()) {
         if (!recentBranchIds.has(branchId)) {
           advices.push(
-            `🌿 FORGOTTEN: Branch "${branchId}" untouched 3+ thoughts. Integrate or close.`
+            `ðŸŒ¿ FORGOTTEN: Branch "${branchId}" untouched 3+ thoughts. Integrate or close.`
           );
           break;
         }
@@ -100,7 +100,7 @@ export class CoachingService {
 
       if (avgEntropy < MIN_ENTROPY_THRESHOLD || (isDecreasing && entropies[2] < 0.3)) {
         advices.push(
-          `📉 ENTROPY: Vocabulary diversity low (${avgEntropy.toFixed(2)}). Rephrase with different concepts.`
+          `ðŸ“‰ ENTROPY: Vocabulary diversity low (${avgEntropy.toFixed(2)}). Rephrase with different concepts.`
         );
       }
     }
@@ -116,15 +116,15 @@ export class CoachingService {
 
         if (pressureLevel === 1) {
           advices.push(
-            '💡 LINEAR: Consider extend_thought:critique or branch.'
+            'ðŸ’¡ LINEAR: Consider quickExtension:critique or branch.'
           );
         } else if (pressureLevel === 2) {
           advices.push(
-            '⚠️ LINEAR: STRONGLY use extend_thought:assumption_testing.'
+            'âš ï¸ LINEAR: STRONGLY use quickExtension:assumption_testing.'
           );
         } else {
           advices.push(
-            `🚨 CRITICAL: ${thoughtCount} thoughts, ZERO lateral. STOP and critique.`
+            `ðŸš¨ CRITICAL: ${thoughtCount} thoughts, ZERO lateral. STOP and critique.`
           );
         }
       }
@@ -134,11 +134,11 @@ export class CoachingService {
     if (thoughtCount >= MAX_THOUGHTS_BUDGET) {
       const overBudget = thoughtCount - MAX_THOUGHTS_BUDGET;
       if (overBudget === 0) {
-        advices.push(`💰 BUDGET: ${MAX_THOUGHTS_BUDGET} thoughts. Consolidate.`);
+        advices.push(`ðŸ’° BUDGET: ${MAX_THOUGHTS_BUDGET} thoughts. Consolidate.`);
       } else if (overBudget <= 3) {
-        advices.push(`⚠️ OVER BUDGET: ${thoughtCount} thoughts. Consolidate NOW.`);
+        advices.push(`âš ï¸ OVER BUDGET: ${thoughtCount} thoughts. Consolidate NOW.`);
       } else {
-        advices.push(`🚨 PARALYSIS: ${thoughtCount} thoughts. STOP. Consolidate immediately.`);
+        advices.push(`ðŸš¨ PARALYSIS: ${thoughtCount} thoughts. STOP. Consolidate immediately.`);
       }
     }
 
@@ -179,7 +179,7 @@ export class CoachingService {
         (trigger) => lastContent.includes(trigger) || allContent.includes(trigger)
       );
       if (hasOptimizationTrigger) {
-        return '🎯 COACH: TODO/perf detected. Use extend_thought:optimization';
+        return 'ðŸŽ¯ COACH: Performance signals detected. Use quickExtension:optimization';
       }
     }
 
@@ -189,7 +189,7 @@ export class CoachingService {
         lastContent.includes(trigger)
       ).length;
       if (uncertaintyCount >= 2) {
-        return '🎯 COACH: Uncertain language. Use extend_thought:assumption_testing';
+        return 'ðŸŽ¯ COACH: Uncertain language. Use quickExtension:assumption_testing';
       }
     }
 
@@ -199,7 +199,7 @@ export class CoachingService {
       const hasHighConfidence =
         lastThought.confidence && lastThought.confidence >= POLISH_THRESHOLD_CONFIDENCE;
       if (isNearEnd && hasHighConfidence) {
-        return '🎯 COACH: High confidence. Use extend_thought:polish';
+        return 'ðŸŽ¯ COACH: High confidence. Use quickExtension:polish';
       }
     }
 
@@ -207,7 +207,7 @@ export class CoachingService {
     if (!existingExtensions.has('innovation') && sessionThoughts.length >= INNOVATION_THRESHOLD_THOUGHTS) {
       const hasBranches = sessionThoughts.some((t) => t.branchFromThought !== undefined);
       if (!hasBranches) {
-        return '🎯 COACH: Long session. Use extend_thought:innovation';
+        return 'ðŸŽ¯ COACH: Long session. Use quickExtension:innovation';
       }
     }
 
@@ -223,7 +223,7 @@ export class CoachingService {
     // Short thought detection
     if (input.thought.length < MIN_THOUGHT_LENGTH && input.nextThoughtNeeded) {
       this.addAdviceWithCooldown(
-        `⚠️ SHORT: ${input.thought.length} chars. Expand.`,
+        `âš ï¸ SHORT: ${input.thought.length} chars. Expand.`,
         nudges
       );
     }
@@ -231,7 +231,7 @@ export class CoachingService {
     // Low confidence nudge
     if (input.confidence && input.confidence < LOW_CONFIDENCE_THRESHOLD) {
       this.addAdviceWithCooldown(
-        `💡 LOW (${input.confidence}/10): Use quickExtension:critique`,
+        `ðŸ’¡ LOW (${input.confidence}/10): Use quickExtension:critique`,
         nudges
       );
     }
@@ -241,7 +241,7 @@ export class CoachingService {
       const hasCritique = sessionThoughts.some((t) => t.extensions?.some((e) => e.type === 'critique'));
       if (!hasCritique) {
         this.addAdviceWithCooldown(
-          `🧐 NO CRITIQUE: ${sessionThoughts.length} thoughts. Use quickExtension:critique`,
+          `ðŸ§ NO CRITIQUE: ${sessionThoughts.length} thoughts. Use quickExtension:critique`,
           nudges
         );
       }
@@ -250,7 +250,7 @@ export class CoachingService {
     // Smart pruning reminder
     if (sessionThoughts.length >= SMART_PRUNING_THRESHOLD) {
       this.addAdviceWithCooldown(
-        `🧹 LONG (${sessionThoughts.length} thoughts): Auto-pruning. Consolidate soon.`,
+        `ðŸ§¹ LONG (${sessionThoughts.length} thoughts): Auto-pruning. Consolidate soon.`,
         nudges
       );
     }
@@ -262,7 +262,7 @@ export class CoachingService {
       input.confidence < NEAR_LIMIT_CONFIDENCE_THRESHOLD
     ) {
       this.addAdviceWithCooldown(
-        `⚠️ NEAR LIMIT: ${input.thoughtNumber}/${input.totalThoughts}, confidence ${input.confidence}/10.`,
+        `âš ï¸ NEAR LIMIT: ${input.thoughtNumber}/${input.totalThoughts}, confidence ${input.confidence}/10.`,
         nudges
       );
     }
@@ -290,7 +290,7 @@ export class CoachingService {
       const totalSteps = allSubSteps.reduce((sum, s) => sum + s.steps.length, 0);
       const thoughtsWithSteps = allSubSteps.map((s) => `#${s.thoughtNum}`).join(', ');
       auditWarnings.push(
-        `📋 SUBSTEPS: ${totalSteps} defined in ${thoughtsWithSteps}. Verify completion.`
+        `ðŸ“‹ SUBSTEPS: ${totalSteps} defined in ${thoughtsWithSteps}. Verify completion.`
       );
     }
 
@@ -314,7 +314,7 @@ export class CoachingService {
 
     if (avgLength < requiredDepth) {
       auditWarnings.push(
-        `🔬 DEPTH: ${Math.round(avgLength)} chars < ${requiredDepth} for ${complexityLevel} task.`
+        `ðŸ”¬ DEPTH: ${Math.round(avgLength)} chars < ${requiredDepth} for ${complexityLevel} task.`
       );
     }
 
@@ -338,15 +338,16 @@ export class CoachingService {
 
     if (unresolvedBlockers.length > 0) {
       auditWarnings.push(
-        `🛑 BLOCKERS: #${unresolvedBlockers.join(', ')} unresolved.`
+        `ðŸ›‘ BLOCKERS: #${unresolvedBlockers.join(', ')} unresolved.`
       );
     }
 
     if (auditWarnings.length > 0) {
-      auditWarnings.unshift('⚡ PRE-CONSOLIDATION AUDIT:');
-      auditWarnings.push('💡 Address items or call think_done.');
+      auditWarnings.unshift('âš¡ PRE-CONSOLIDATION AUDIT:');
+      auditWarnings.push('ðŸ’¡ Address items or call think_done.');
     }
 
     return auditWarnings.length > 0 ? auditWarnings.join('\n') : undefined;
   }
 }
+

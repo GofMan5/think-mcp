@@ -1,0 +1,10 @@
+{
+  "id": "quality-speed-optimization",
+  "title": "Lazy rendering and focused hot-path behavior",
+  "goal": "Ensure performance improvements preserve correctness and response quality.",
+  "expectations": [
+    "Tree rendering is conditional on showTree flag",
+    "Mermaid generation is skipped when includeMermaid is false",
+    "Think flow supports explicit showTree input propagation"
+  ]
+}

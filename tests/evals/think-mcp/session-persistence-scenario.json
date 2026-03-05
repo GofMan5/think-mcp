@@ -1,0 +1,10 @@
+{
+  "id": "session-persistence",
+  "title": "Persistence uses safe atomic writes",
+  "goal": "Ensure session persistence is robust against partial writes and stale sessions.",
+  "expectations": [
+    "Session save path writes to temporary file then renames atomically",
+    "Session loading enforces TTL and resets stale state",
+    "Persistence path keeps dead ends and session metadata"
+  ]
+}

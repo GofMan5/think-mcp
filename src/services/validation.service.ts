@@ -31,7 +31,7 @@ export class ValidationService {
       if (!targetThought) {
         return {
           valid: false,
-          warning: `🚫 INVALID: Cannot revise #${input.revisesThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ')}`,
+          warning: `[ERR_INVALID_REVISION] Cannot revise #${input.revisesThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ')}`,
         };
       }
 
@@ -73,7 +73,7 @@ export class ValidationService {
     if (input.thoughtNumber > expectedNext) {
       return {
         valid: false,
-        warning: `⚠️ SEQUENCE: Expected #${expectedNext}, got #${input.thoughtNumber}.`,
+        warning: `[ERR_SEQUENCE] Expected #${expectedNext}, got #${input.thoughtNumber}.`,
       };
     }
 
@@ -92,7 +92,7 @@ export class ValidationService {
     const exists = sessionThoughts.some((t) => t.thoughtNumber === input.thoughtNumber);
 
     if (exists) {
-      return `🚫 REJECTED: #${input.thoughtNumber} exists. Use isRevision:true or extend_thought.`;
+      return `[ERR_DUPLICATE] #${input.thoughtNumber} exists. Use isRevision:true or quickExtension.`;
     }
     return undefined;
   }
@@ -108,7 +108,7 @@ export class ValidationService {
     const sourceExists = sessionThoughts.some((t) => t.thoughtNumber === input.branchFromThought);
 
     if (!sourceExists) {
-      return `🚫 INVALID: Cannot branch from #${input.branchFromThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ') || 'none'}`;
+      return `[ERR_INVALID_BRANCH] Cannot branch from #${input.branchFromThought}. Available: ${sessionThoughts.map((t) => t.thoughtNumber).join(', ') || 'none'}`;
     }
     return undefined;
   }

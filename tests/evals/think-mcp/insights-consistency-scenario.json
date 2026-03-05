@@ -1,0 +1,10 @@
+{
+  "id": "insights-consistency",
+  "title": "Insights consistency and FIFO integrity",
+  "goal": "Ensure insights persistence keeps schema stability, evicts data safely, and prevents stale pattern counters.",
+  "expectations": [
+    "Insights storage uses schema version 2",
+    "FIFO eviction decrements pattern counters for removed insights",
+    "Loaded pattern map is rebuilt from winning paths to recover from stale/corrupt files"
+  ]
+}

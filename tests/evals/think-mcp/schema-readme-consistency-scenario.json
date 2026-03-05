@@ -1,0 +1,10 @@
+{
+  "id": "schema-readme-consistency",
+  "title": "Tool surface is documented and registered consistently",
+  "goal": "Avoid drift between README docs and actual registered MCP tools.",
+  "expectations": [
+    "All required tool IDs are registered in src/index.ts",
+    "README references all required tool IDs",
+    "No required tool is undocumented or unregistered"
+  ]
+}

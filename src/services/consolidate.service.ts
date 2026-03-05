@@ -46,7 +46,7 @@ export class ConsolidateService {
           unaddressedBlockers: [],
           unaddressedCritical: [],
         },
-        errorMessage: 'No thoughts recorded. Use sequentialthinking first.',
+        errorMessage: 'No thoughts recorded. Use think first.',
       };
     }
 
@@ -197,7 +197,7 @@ export class ConsolidateService {
       }
     } else if (verdict === 'needs_more_work') {
       evaluation =
-        '🔄 ACKNOWLEDGED: You identified this needs more work. Continue with sequentialthinking or extend_thought.';
+        '🔄 ACKNOWLEDGED: You identified this needs more work. Continue with think or quickExtension.';
 
       // Record dead end via callback
       if (onDeadEnd) {

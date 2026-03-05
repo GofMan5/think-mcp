@@ -1,0 +1,10 @@
+{
+  "id": "sequence-safety-gates",
+  "title": "Invalid sequence is hard-rejected",
+  "goal": "Prevent invalid sequence steps from mutating session state.",
+  "expectations": [
+    "Any validation failure returns error for think flow",
+    "Mainline sequence counter ignores revisions and branches",
+    "Sequence errors use stable error codes"
+  ]
+}

@@ -54,7 +54,7 @@ const thinkSchema = {
     type: z.enum(['critique', 'elaboration', 'correction', 'alternative_scenario', 'assumption_testing', 'innovation', 'optimization', 'polish']),
     content: z.string(),
     impact: z.enum(['low', 'medium', 'high', 'blocker']).optional(),
-  }).optional().describe('Inline extension (replaces extend_thought)'),
+  }).optional().describe('Inline extension (replaces separate extension tool)'),
   isRevision: z.boolean().optional().describe('Revising previous thought?'),
   revisesThought: z.number().int().min(1).optional().describe('Which thought to revise'),
   branchFromThought: z.number().int().min(1).optional().describe('Branch point'),
@@ -79,6 +79,7 @@ server.registerTool('think', { title: 'Think', description: THINK_DESCRIPTION, i
         alternatives: args.alternatives as string[] | undefined,
         goal: args.goal as string | undefined,
         quickExtension: args.quickExtension as QuickExtension | undefined,
+        showTree: args.showTree as boolean | undefined,
       });
 
       if (result.isError) {
@@ -175,6 +176,7 @@ server.registerTool('think_batch', { title: 'Think Batch', description: THINK_BA
         goal: args.goal as string,
         thoughts: args.thoughts as BurstThought[],
         consolidation: args.consolidation as BurstConsolidation | undefined,
+        showTree: args.showTree as boolean | undefined,
       });
 
       if (result.status === 'rejected') {
@@ -254,7 +256,7 @@ server.registerTool('think_done', { title: 'Think Done', description: THINK_DONE
         `verdict: ${result.canProceedToFinalAnswer ? 'READY' : 'BLOCKED'}`,
       ].filter(Boolean).join('\n');
 
-      // Export if requested (merged from export_session)
+      // Export if requested (merged export flow)
       if (args.exportReport) {
         const report = thinkingService.exportSession({
           format: args.exportReport as 'markdown' | 'json',

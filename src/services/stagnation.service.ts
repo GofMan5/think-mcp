@@ -54,7 +54,7 @@ export class StagnationService {
         recentWithConf.reduce((sum, t) => sum + (t.confidence ?? 0), 0) / recentWithConf.length;
 
       if (isDecreasing && avgRecent < 5) {
-        return `⚠️ CONFIDENCE DROP: Avg ${avgRecent.toFixed(1)}. Use extend_thought:critique`;
+        return `⚠️ CONFIDENCE DROP: Avg ${avgRecent.toFixed(1)}. Use quickExtension:critique`;
       }
     }
 

@@ -72,6 +72,10 @@ Add this to your MCP settings file:
 ### 1. `think`
 *The core unit of reasoning.* Adds a single thought to the chain.
 
+> **⚠️ Sequence Safety**
+> - `IF thoughtNumber skips expected step` → Reject (`ERR_SEQUENCE`)
+> - `IF invalid revision/branch target` → Reject with stable error code
+
 ```typescript
 {
   thought: string,             // The reasoning content
@@ -152,6 +156,27 @@ Add this to your MCP settings file:
 ### 5. `think_done` & `think_reset`
 - **`think_done`**: Finalize session. Validates gaps, blockers, and confidence levels.
 - **`think_reset`**: Wipe the slate clean. *(Use only if task context changes completely).*
+
+---
+
+## ✅ Quality Gates
+
+Before release:
+
+```bash
+npm run validate:release
+```
+
+Local hardening eval report:
+
+```bash
+npm run eval:local
+```
+
+### Runtime Storage
+
+- Session and insights data are stored in user data directory (`~/.think-mcp` by default).
+- Override path via environment variable: `THINK_MCP_DATA_DIR`.
 
 ---
 

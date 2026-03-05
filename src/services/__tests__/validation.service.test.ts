@@ -52,7 +52,7 @@ describe('ValidationService', () => {
       const input = createInput('Third', 3); // Skipping 2
       const result = service.validateSequence(input, history, 1);
       expect(result.valid).toBe(false);
-      expect(result.warning).toContain('Sequence break');
+      expect(result.warning).toContain('ERR_SEQUENCE');
     });
 
     it('should accept valid revision', () => {
@@ -76,7 +76,7 @@ describe('ValidationService', () => {
       });
       const result = service.validateSequence(input, history, 1);
       expect(result.valid).toBe(false);
-      expect(result.warning).toContain('INVALID REVISION');
+      expect(result.warning).toContain('ERR_INVALID_REVISION');
     });
 
     it('should reject shallow revision (too similar)', () => {
@@ -98,7 +98,7 @@ describe('ValidationService', () => {
       const history = [createThought('First', 1)];
       const input = createInput('Another first', 1);
       const result = service.checkDuplicateStrict(input, history);
-      expect(result).toContain('REJECTED');
+      expect(result).toContain('ERR_DUPLICATE');
     });
 
     it('should allow revision with same number', () => {
@@ -131,7 +131,7 @@ describe('ValidationService', () => {
       const history = [createThought('First', 1)];
       const input = createInput('Branch', 2, { branchFromThought: 5 });
       const result = service.validateBranchSource(input, history);
-      expect(result).toContain('INVALID BRANCH');
+      expect(result).toContain('ERR_INVALID_BRANCH');
     });
 
     it('should allow input without branch', () => {

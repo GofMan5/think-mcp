@@ -1,0 +1,10 @@
+{
+  "id": "security-baseline",
+  "title": "Security gates and dependency baseline",
+  "goal": "Ensure release pipeline and dependency policy enforce security constraints.",
+  "expectations": [
+    "SDK dependency is on a patched baseline",
+    "Publish workflow runs security audit gate",
+    "Release trigger is tag-based rather than direct branch push"
+  ]
+}

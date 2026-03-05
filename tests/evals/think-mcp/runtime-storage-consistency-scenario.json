@@ -1,0 +1,11 @@
+{
+  "id": "runtime-storage-consistency",
+  "title": "Runtime storage path and legacy migration consistency",
+  "goal": "Guarantee session/insights persistence uses user data directory with safe migration from legacy root files.",
+  "expectations": [
+    "Runtime storage supports THINK_MCP_DATA_DIR override",
+    "Session persistence migrates legacy session file into runtime data directory",
+    "Insights persistence migrates legacy insights file into runtime data directory",
+    "README documents runtime storage override"
+  ]
+}

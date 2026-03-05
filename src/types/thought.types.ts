@@ -178,7 +178,7 @@ export interface PathConnectivityResult {
 }
 
 
-/** Options for export_session tool (v2.10.0) */
+/** Options for session export flow (v2.10.0) */
 export interface ExportSessionOptions {
   format?: 'markdown' | 'json';
   includeMermaid?: boolean;
@@ -306,6 +306,8 @@ export interface SubmitSessionInput {
   thoughts: BurstThought[];
   /** Optional consolidation if ready */
   consolidation?: BurstConsolidation;
+  /** Include ASCII tree in response (default: false) */
+  showTree?: boolean;
 }
 
 /** Validation metrics for burst session */

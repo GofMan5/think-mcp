@@ -1,0 +1,10 @@
+{
+  "id": "state-integrity",
+  "title": "Batch session preserves state and identifiers",
+  "goal": "Guarantee batch submission keeps session id and goal in memory/export state.",
+  "expectations": [
+    "Batch flow resets stale state before creating new session id",
+    "Batch flow preserves session goal after reset",
+    "Submitted records carry the active session id"
+  ]
+}

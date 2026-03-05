@@ -41,6 +41,11 @@ import type {
   SubmitSessionInput,
   SubmitSessionResult,
 } from '../types/thought.types.js';
+import {
+  ensureThinkMcpDataDir,
+  getThinkMcpDataFile,
+  migrateLegacyFile,
+} from '../utils/storage-paths.js';
 
 // Import constants from dedicated modules
 import {
@@ -85,7 +90,8 @@ import { NudgeService } from './nudge.service.js';
 // Session file path (relative to module directory)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const SESSION_FILE = join(__dirname, '..', '..', SESSION_FILE_NAME);
+const LEGACY_SESSION_FILE = join(__dirname, '..', '..', SESSION_FILE_NAME);
+const SESSION_FILE = getThinkMcpDataFile(SESSION_FILE_NAME);
 
 export class ThinkingService {
   private thoughtHistory: ThoughtRecord[] = [];
@@ -203,6 +209,7 @@ export class ThinkingService {
     if (input.thoughtNumber > input.totalThoughts) {
       input.totalThoughts = input.thoughtNumber;
     }
+    const shouldShowTree = input.showTree === true;
 
     // EMPTY THOUGHT VALIDATION - reject meaningless input
     if (!input.thought || !input.thought.trim()) {
@@ -213,10 +220,10 @@ export class ThinkingService {
         branches: Array.from(this.branches.keys()),
         thoughtHistoryLength: this.thoughtHistory.length,
         contextSummary: this.generateContextSummary(),
-        thoughtTree: this.generateAsciiTree(),
+        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
         isError: true,
-        errorMessage: '🚫 REJECTED: Empty thought. Provide meaningful content.',
-        warning: '🚫 REJECTED: Empty thought. Provide meaningful content.',
+        errorMessage: '[ERR_EMPTY_THOUGHT] Empty thought. Provide meaningful content.',
+        warning: '[ERR_EMPTY_THOUGHT] Empty thought. Provide meaningful content.',
       };
     }
 
@@ -236,7 +243,7 @@ export class ThinkingService {
         branches: Array.from(this.branches.keys()),
         thoughtHistoryLength: this.thoughtHistory.length,
         contextSummary: this.generateContextSummary(),
-        thoughtTree: this.generateAsciiTree(),
+        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
         isError: true,
         errorMessage: duplicateError,
         warning: duplicateError,
@@ -253,7 +260,7 @@ export class ThinkingService {
         branches: Array.from(this.branches.keys()),
         thoughtHistoryLength: this.thoughtHistory.length,
         contextSummary: this.generateContextSummary(),
-        thoughtTree: this.generateAsciiTree(),
+        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
         isError: true,
         errorMessage: branchError,
         warning: branchError,
@@ -263,8 +270,8 @@ export class ThinkingService {
     // Validate sequence (includes shallow/circular revision check)
     const validation = this.validateSequence(input);
     
-    // HARD REJECTION for invalid revisions (shallow, circular, non-existent target)
-    if (!validation.valid && input.isRevision) {
+    // HARD REJECTION for invalid sequence/revision validation failures
+    if (!validation.valid) {
       return {
         thoughtNumber: input.thoughtNumber,
         totalThoughts: input.totalThoughts,
@@ -272,7 +279,7 @@ export class ThinkingService {
         branches: Array.from(this.branches.keys()),
         thoughtHistoryLength: this.thoughtHistory.length,
         contextSummary: this.generateContextSummary(),
-        thoughtTree: this.generateAsciiTree(),
+        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
         isError: true,
         errorMessage: validation.warning,
         warning: validation.warning,
@@ -290,7 +297,10 @@ export class ThinkingService {
     };
 
     this.thoughtHistory.push(record);
-    this.lastThoughtNumber = input.thoughtNumber;
+    // Revisions and branches do not advance the mainline sequence counter.
+    if (!input.isRevision && !input.branchFromThought) {
+      this.lastThoughtNumber = input.thoughtNumber;
+    }
 
     // Invalidate Fuse index for recall_thought (v3.4.0)
     this.invalidateFuseIndex();
@@ -359,8 +369,8 @@ export class ThinkingService {
       branches: Array.from(this.branches.keys()),
       thoughtHistoryLength: this.thoughtHistory.length,
       contextSummary: this.generateContextSummary(),
-      thoughtTree: this.generateAsciiTree(),
-      // v4.2.0: Lazy Mermaid - removed from hot path, use export_session for diagrams
+      thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
+      // v4.2.0: Lazy Mermaid - removed from hot path, use export report flow for diagrams
       thoughtTreeMermaid: undefined,
       warning: warning || undefined,
       averageConfidence: this.calculateAverageConfidence(),
@@ -732,7 +742,7 @@ export class ThinkingService {
         // Original logic for other types
         if (impactOnFinalResult === 'blocker' || impactOnFinalResult === 'high') {
           systemAdvice =
-            "WARNING: This extension identified a critical issue. You should probably use 'sequentialthinking' with isRevision: true next.";
+            "WARNING: This extension identified a critical issue. You should probably use 'think' with isRevision: true next.";
         }
     }
 
@@ -815,7 +825,9 @@ export class ThinkingService {
    */
   async saveSession(): Promise<void> {
     return this.withFsLock(async () => {
+      await ensureThinkMcpDataDir();
       const data = {
+        schemaVersion: 2,
         history: this.thoughtHistory,
         branches: Array.from(this.branches.entries()),
         lastThoughtNumber: this.lastThoughtNumber,
@@ -839,6 +851,20 @@ export class ThinkingService {
   }
 
   /**
+   * Migrate legacy root-level session file to runtime data directory.
+   */
+  private async migrateLegacySessionIfNeeded(): Promise<void> {
+    try {
+      const migrated = await migrateLegacyFile(LEGACY_SESSION_FILE, SESSION_FILE);
+      if (migrated) {
+        console.error(`📦 Migrated legacy session file to ${SESSION_FILE}`);
+      }
+    } catch (error) {
+      console.error('Failed to migrate legacy session file:', error);
+    }
+  }
+
+  /**
    * Load session state from file
    * Call this during initialization to restore previous session
    * Validates JSON structure to prevent corrupted state
@@ -846,6 +872,7 @@ export class ThinkingService {
    */
   async loadSession(): Promise<boolean> {
     try {
+      await this.migrateLegacySessionIfNeeded();
       // v3.2.0: Check session TTL before loading
       const stats = await fs.stat(SESSION_FILE);
       const hoursOld = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
@@ -857,6 +884,7 @@ export class ThinkingService {
 
       const content = await fs.readFile(SESSION_FILE, 'utf-8');
       const data = JSON.parse(content);
+      const schemaVersion = Number(data.schemaVersion ?? 1);
 
       // Validate JSON structure before using
       if (!data || !Array.isArray(data.history) || !Array.isArray(data.branches)) {
@@ -871,7 +899,7 @@ export class ThinkingService {
       this.deadEnds = data.deadEnds ?? []; // v3.3.0 - restore dead ends
 
       const deadEndsInfo = this.deadEnds.length > 0 ? `, ${this.deadEnds.length} dead ends` : '';
-      console.error(`📂 Restored session from ${data.savedAt} (${this.thoughtHistory.length} thoughts${deadEndsInfo}${this.currentSessionId ? `, session: ${this.currentSessionId.substring(0, 10)}...` : ''})`);
+      console.error(`📂 Restored session v${schemaVersion} from ${data.savedAt} (${this.thoughtHistory.length} thoughts${deadEndsInfo}${this.currentSessionId ? `, session: ${this.currentSessionId.substring(0, 10)}...` : ''})`);
       return true;
     } catch (error) {
       // File doesn't exist or is corrupted - start fresh
@@ -907,6 +935,13 @@ export class ThinkingService {
         console.error('Session file cleared');
       } catch {
         // File doesn't exist, ignore
+      }
+      try {
+        if (LEGACY_SESSION_FILE !== SESSION_FILE) {
+          await fs.unlink(LEGACY_SESSION_FILE);
+        }
+      } catch {
+        // Legacy file may not exist.
       }
       // DO NOT call reset() here - it causes race condition with processThought
       // Memory reset is handled synchronously in processThought before this runs
@@ -956,6 +991,7 @@ export class ThinkingService {
    * Delegates to ExportService
    */
   exportSession(options: { format?: 'markdown' | 'json'; includeMermaid?: boolean } = {}): string {
+    const includeMermaid = options.includeMermaid ?? true;
     return this.exportService.export(
       {
         thoughts: this.getCurrentSessionThoughts(),
@@ -963,9 +999,9 @@ export class ThinkingService {
         deadEnds: this.getDeadEnds(),
         sessionGoal: this.sessionGoal,
         averageConfidence: this.calculateAverageConfidence(),
-        mermaidDiagram: this.generateMermaid(),
+        mermaidDiagram: includeMermaid ? this.generateMermaid() : undefined,
       },
-      options
+      { ...options, includeMermaid }
     );
   }
 
@@ -978,7 +1014,7 @@ export class ThinkingService {
    * Delegates validation to BurstService, commits results to state
    */
   submitSession(input: SubmitSessionInput): SubmitSessionResult {
-    const { goal, thoughts, consolidation } = input;
+    const { goal, thoughts, consolidation, showTree = false } = input;
 
     // Validate using BurstService
     const validation = this.burstService.validate(goal, thoughts, consolidation);
@@ -996,9 +1032,9 @@ export class ThinkingService {
     }
 
     // === Commit Session ===
+    this.reset();
     this.currentSessionId = new Date().toISOString();
     this.sessionGoal = goal;
-    this.reset();
 
     // Convert and add thoughts to history
     for (const t of validation.sortedThoughts) {
@@ -1058,7 +1094,7 @@ export class ThinkingService {
       validation: { passed: true, errors: [], warnings: validation.warnings },
       metrics: validation.metrics,
       // v5.0.1: Tree is lazy - generated only when requested via showTree param
-      thoughtTree: this.generateAsciiTree(),
+      thoughtTree: showTree ? this.generateAsciiTree() : undefined,
       systemAdvice,
       nudge,
     };
