@@ -530,3 +530,140 @@ export interface LogicMethodology {
   stackReminders?: string[];
 }
 
+// ============================================
+// v5.2.0 - Adaptive Cycle Thinking Edition
+// ============================================
+
+/** Actions for think_cycle tool */
+export type CycleAction = 'start' | 'step' | 'status' | 'finalize' | 'reset';
+
+/** Backend mode for think_cycle interoperability */
+export type CycleBackendMode = 'auto' | 'independent' | 'think';
+
+/** Thought classification used in cycle scoring */
+export type CycleThoughtType =
+  | 'decompose'
+  | 'alternative'
+  | 'critique'
+  | 'synthesis'
+  | 'verification'
+  | 'revision';
+
+/** Gate reason codes returned by think_cycle */
+export type CycleReasonCode =
+  | 'BELOW_REQUIRED_THOUGHTS'
+  | 'MISSING_PHASE_DECOMPOSE'
+  | 'MISSING_PHASE_ALTERNATIVE'
+  | 'MISSING_PHASE_CRITIQUE'
+  | 'MISSING_PHASE_SYNTHESIS'
+  | 'MISSING_PHASE_VERIFICATION'
+  | 'LOW_OVERALL_QUALITY'
+  | 'LOW_CRITIQUE_DEPTH'
+  | 'LOW_VERIFICATION_DEPTH'
+  | 'LOW_DIVERSITY'
+  | 'LOW_CONFIDENCE_STABILITY'
+  | 'TOO_MANY_SHORT_THOUGHTS'
+  | 'CONTRADICTION_SIGNAL'
+  | 'MAX_LOOPS_REACHED'
+  | 'INTEROP_BACKEND_ERROR'
+  | 'SESSION_NOT_FOUND'
+  | 'INVALID_ACTION'
+  | 'INVALID_INPUT';
+
+/** Quality metrics reported by think_cycle */
+export interface CycleQuality {
+  overall: number;
+  coverage: number;
+  critique: number;
+  verification: number;
+  diversity: number;
+  confidenceStability: number;
+}
+
+/** Loop counters reported by think_cycle */
+export interface CycleLoopState {
+  current: number;
+  max: number;
+  required: number;
+  remaining: number;
+}
+
+/** Gate state reported by think_cycle */
+export interface CycleGate {
+  passed: boolean;
+  reasonCodes: CycleReasonCode[];
+}
+
+/** Throughput and quality KPIs for cycle monitoring */
+export interface CycleKpi {
+  thoughtsPerMinute: number;
+  qualityDelta: number;
+  stagnationRisk: number;
+}
+
+/** Internal phase coverage flags */
+export interface CyclePhaseCoverage {
+  decompose: boolean;
+  alternative: boolean;
+  critique: boolean;
+  synthesis: boolean;
+  verification: boolean;
+}
+
+/** Single thought record stored by think_cycle */
+export interface CycleThoughtRecord {
+  index: number;
+  thought: string;
+  thoughtType: CycleThoughtType;
+  confidence?: number;
+  timestamp: number;
+}
+
+/** Session model for think_cycle */
+export interface CycleSession {
+  sessionId: string;
+  goal: string;
+  context?: string;
+  constraints: string[];
+  createdAt: number;
+  updatedAt: number;
+  maxLoops: number;
+  requiredThoughts: number;
+  backendMode: CycleBackendMode;
+  thoughts: CycleThoughtRecord[];
+  phaseCoverage: CyclePhaseCoverage;
+  interopFallback: boolean;
+}
+
+/** Input for think_cycle tool */
+export interface ThinkCycleInput {
+  action: CycleAction;
+  sessionId?: string;
+  goal?: string;
+  context?: string;
+  constraints?: string[];
+  thought?: string;
+  thoughtType?: CycleThoughtType;
+  confidence?: number;
+  finalAnswer?: string;
+  backendMode?: CycleBackendMode;
+  maxLoops?: number;
+  showTrace?: boolean;
+}
+
+/** Output for think_cycle tool */
+export interface ThinkCycleResult {
+  status: 'in_progress' | 'blocked' | 'ready' | 'completed' | 'error';
+  sessionId: string;
+  loop: CycleLoopState;
+  quality: CycleQuality;
+  kpi: CycleKpi;
+  gate: CycleGate;
+  requiredMoreThoughts: number;
+  nextPrompts: string[];
+  shortTrace: string[];
+  finalApprovedAnswer?: string;
+  interopFallback?: boolean;
+  errorMessage?: string;
+}
+

@@ -1,0 +1,10 @@
+{
+  "id": "think-interop-fallback",
+  "title": "think_cycle interop fallback behavior",
+  "goal": "Guarantee backend interoperability policy is deterministic across auto and think modes.",
+  "expectations": [
+    "backendMode=auto falls back to independent cycle mode when think backend fails",
+    "backendMode=think does not fallback and returns interop backend error",
+    "think_cycle tool is registered and exposed in API surface"
+  ]
+}

@@ -16,6 +16,11 @@ const REQUIRED_SCENARIO_IDS = [
   'session-persistence',
   'runtime-storage-consistency',
   'insights-consistency',
+  'adaptive-cycle-gate',
+  'think-interop-fallback',
+  'autonomy-quality',
+  'safety-gates',
+  'bounded-retries',
   'schema-readme-consistency',
   'quality-speed-optimization',
   'security-baseline',
@@ -97,23 +102,27 @@ function gteVersion(a, b) {
 function getSignals() {
   const indexTs = readText('src/index.ts');
   const thinkingTs = readText('src/services/thinking.service.ts');
+  const cycleTs = readText('src/services/cycle.service.ts');
   const insightsTs = readText('src/services/insights.service.ts');
   const validationTs = readText('src/services/validation.service.ts');
   const storagePathsTs = readText('src/utils/storage-paths.ts');
   const readme = readText('README.md');
+  const qualityStandard = readText('docs/quality/HARD_QUALITY_STANDARD.md');
   const publish = readText('.github/workflows/publish.yml');
   const pkg = readJson('package.json');
 
-  const requiredTools = ['think', 'think_batch', 'think_done', 'think_recall', 'think_reset', 'think_logic'];
+  const requiredTools = ['think', 'think_batch', 'think_done', 'think_recall', 'think_reset', 'think_cycle', 'think_logic'];
   const registeredTools = [...indexTs.matchAll(/registerTool\('([^']+)'/g)].map((m) => m[1]);
 
   return {
     indexTs,
     thinkingTs,
+    cycleTs,
     insightsTs,
     validationTs,
     storagePathsTs,
     readme,
+    qualityStandard,
     publish,
     pkg,
     requiredTools,
@@ -201,6 +210,111 @@ function validateScenario(scenario, signals) {
         id: 'rebuild-patterns-on-load',
         description: 'Loaded patterns are rebuilt from winning paths for integrity',
         pass: /patterns:\s*this\.buildPatternCounts\(winningPaths\)/.test(signals.insightsTs),
+      },
+    ],
+    'adaptive-cycle-gate': [
+      {
+        id: 'cycle-service-exists',
+        description: 'Cycle service is implemented',
+        pass: /export class CycleService/.test(signals.cycleTs),
+      },
+      {
+        id: 'hard-quality-threshold',
+        description: 'Cycle quality gate threshold is enforced at 0.75',
+        pass: /QUALITY_GATE_THRESHOLD = 0\.75/.test(signals.cycleTs),
+      },
+      {
+        id: 'adaptive-required-thoughts',
+        description: 'Required thoughts are calculated adaptively and clamped to 10-20',
+        pass: /8 \+ Math\.round\(complexityScore \* 4\)/.test(signals.cycleTs) && /CYCLE_REQUIRED_MIN/.test(signals.cycleTs) && /CYCLE_REQUIRED_MAX/.test(signals.cycleTs),
+      },
+      {
+        id: 'min-10-more-thoughts',
+        description: 'Failed finalize asks for at least 10 more thoughts when budget allows',
+        pass: /Math\.max\(10, baseNeed, weakBoost\)/.test(signals.cycleTs),
+      },
+      {
+        id: 'all-required-phases',
+        description: 'Gate requires decompose/alternative/critique/synthesis/verification coverage',
+        pass: /'decompose',\s*'alternative',\s*'critique',\s*'synthesis',\s*'verification'/.test(signals.cycleTs),
+      },
+    ],
+    'think-interop-fallback': [
+      {
+        id: 'auto-fallback-flag',
+        description: 'Auto mode sets interop fallback flag on backend failure',
+        pass: /session\.interopFallback = true/.test(signals.cycleTs),
+      },
+      {
+        id: 'think-strict-no-fallback',
+        description: 'Think mode returns interop backend error without fallback',
+        pass: /session\.backendMode === 'think'/.test(signals.cycleTs) && /INTEROP_BACKEND_ERROR/.test(signals.cycleTs),
+      },
+      {
+        id: 'tool-registered',
+        description: 'think_cycle tool is registered in server index',
+        pass: /registerTool\('think_cycle'/.test(signals.indexTs),
+      },
+    ],
+    'autonomy-quality': [
+      {
+        id: 'decomposition-policy',
+        description: 'Hard quality standard requires dependency-safe decomposition',
+        pass: /decompose work into dependency-safe units/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'incremental-validation-policy',
+        description: 'Hard quality standard requires increment-level validation',
+        pass: /validate each increment/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'self-check-policy',
+        description: 'Hard quality standard requires iteration self-check report',
+        pass: /iteration self-check report/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'threshold-policy',
+        description: 'Hard quality standard defines quality threshold stop condition',
+        pass: /quality threshold:\s*\*\*90\/100\*\*/i.test(signals.qualityStandard),
+      },
+    ],
+    'safety-gates': [
+      {
+        id: 'stop-on-failure-policy',
+        description: 'Hard quality standard enforces stop-on-failure',
+        pass: /stop-on-failure/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'report-first-policy',
+        description: 'Hard quality standard enforces report-first recovery sequence',
+        pass: /report error -> propose fix -> request approval -> apply fix/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'no-hidden-autofix-policy',
+        description: 'Hard quality standard forbids hidden auto-fix',
+        pass: /no hidden auto-fix/i.test(signals.qualityStandard),
+      },
+    ],
+    'bounded-retries': [
+      {
+        id: 'retry-bound-policy',
+        description: 'Hard quality standard sets per-component retry bound',
+        pass: /max 3 self-improvement retries per component/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'anti-loop-policy',
+        description: 'Hard quality standard forbids unbounded retry loops',
+        pass: /do not run unbounded retry loops/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'escalation-policy',
+        description: 'Hard quality standard requires escalation with gap report',
+        pass: /escalate with a gap report/i.test(signals.qualityStandard),
+      },
+      {
+        id: 'cycle-max-loops-enforced',
+        description: 'Cycle service enforces max loop limit',
+        pass: /CYCLE_MIN_MAX_LOOPS = 10/.test(signals.cycleTs) && /CYCLE_MAX_MAX_LOOPS = 30/.test(signals.cycleTs),
       },
     ],
     'schema-readme-consistency': [

@@ -1,0 +1,11 @@
+{
+  "id": "bounded-retries",
+  "title": "Bounded retries and escalation standard",
+  "goal": "Ensure bounded retry and escalation policies from NEED_ADD are enforced in repository quality gates.",
+  "expectations": [
+    "Per-component retry bound is documented",
+    "Unbounded retry loops are forbidden",
+    "Escalation with gap report is required",
+    "Cycle loop budget constraints are implemented"
+  ]
+}

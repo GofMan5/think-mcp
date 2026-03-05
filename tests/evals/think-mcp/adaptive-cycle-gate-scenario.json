@@ -1,0 +1,11 @@
+{
+  "id": "adaptive-cycle-gate",
+  "title": "Adaptive cycle gate enforces deep reasoning",
+  "goal": "Ensure think_cycle adapts thought depth and blocks low-quality early finalize attempts.",
+  "expectations": [
+    "Cycle service computes adaptive required thought count with 10-20 clamp",
+    "Finalize gate requires all core reasoning phases",
+    "Finalize gate enforces quality threshold >= 0.75",
+    "Failed finalize asks for at least 10 more thoughts when budget allows"
+  ]
+}

@@ -22,6 +22,11 @@ npm run eval:local
 - `session-persistence`
 - `runtime-storage-consistency`
 - `insights-consistency`
+- `adaptive-cycle-gate`
+- `think-interop-fallback`
+- `autonomy-quality`
+- `safety-gates`
+- `bounded-retries`
 - `schema-readme-consistency`
 - `quality-speed-optimization`
 - `security-baseline`

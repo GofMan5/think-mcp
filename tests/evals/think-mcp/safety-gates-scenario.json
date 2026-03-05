@@ -1,0 +1,10 @@
+{
+  "id": "safety-gates",
+  "title": "Safety gates hardening standard",
+  "goal": "Ensure stop-on-failure and report-first quality standards are mandatory for repository validation.",
+  "expectations": [
+    "Stop-on-failure policy is documented",
+    "Report-first recovery sequence is documented",
+    "No hidden auto-fix policy is documented"
+  ]
+}

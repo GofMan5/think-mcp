@@ -1,6 +1,6 @@
-<div align="center">
+﻿<div align="center">
 
-# 🧠 Think MCP
+# ðŸ§  Think MCP
 
 **Structured Sequential Thinking Server for LLMs**
 
@@ -13,13 +13,13 @@
   Designed for LLMs to think deeper, smarter, and more efficiently.
 </p>
 
-[Quick Start](#-quick-start) • [Tools](#-tools-reference) • [Features](#-features) • [Changelog](#-changelog)
+[Quick Start](#-quick-start) â€¢ [Tools](#-tools-reference) â€¢ [Features](#-features) â€¢ [Changelog](#-changelog)
 
 </div>
 
 ---
 
-## 📖 Overview
+## ðŸ“– Overview
 
 **Think MCP** transforms how LLMs approach problem-solving. It's not just a tool; it's a cognitive framework that enables:
 - **Sequential Reasoning**: Step-by-step problem decomposition.
@@ -29,20 +29,21 @@
 
 ---
 
-## ✨ Features
+## âœ¨ Features
 
 | Feature | Description |
 | :--- | :--- |
-| **🚀 Efficient Thinking** | **Imperative Prompts (v5.1)** reduce token usage by ~55% using IF/THEN logic. |
-| **⚡️ Burst Mode** | Submit up to **30 thoughts** in a single API call with `think_batch`. |
-| **🧠 Methodology Generator** | On-demand deep analysis frameworks (Chain Mapping, Crack Hunting, etc.) via `think_logic`. |
-| **💾 Smart Memory** | Cross-session learning via `think_recall` and auto-save with 24h retention. |
-| **🔔 Nudge System** | Proactive micro-prompts to detect low confidence, tunnel vision, or missed steps. |
-| **🌳 Branching** | Explore alternative paths without losing context. |
+| **ðŸš€ Efficient Thinking** | **Imperative Prompts (v5.1)** reduce token usage by ~55% using IF/THEN logic. |
+| **âš¡ï¸ Burst Mode** | Submit up to **30 thoughts** in a single API call with `think_batch`. |
+| **ðŸ§  Methodology Generator** | On-demand deep analysis frameworks (Chain Mapping, Crack Hunting, etc.) via `think_logic`. |
+| **Adaptive Cycle** | `think_cycle` enforces hard quality gates before allowing final answer. |
+| **ðŸ’¾ Smart Memory** | Cross-session learning via `think_recall` and auto-save with 24h retention. |
+| **ðŸ”” Nudge System** | Proactive micro-prompts to detect low confidence, tunnel vision, or missed steps. |
+| **ðŸŒ³ Branching** | Explore alternative paths without losing context. |
 
 ---
 
-## 🚀 Quick Start
+## ðŸš€ Quick Start
 
 ### Installation
 
@@ -67,14 +68,14 @@ Add this to your MCP settings file:
 
 ---
 
-## 🛠️ Tools Reference
+## ðŸ› ï¸ Tools Reference
 
 ### 1. `think`
 *The core unit of reasoning.* Adds a single thought to the chain.
 
-> **⚠️ Sequence Safety**
-> - `IF thoughtNumber skips expected step` → Reject (`ERR_SEQUENCE`)
-> - `IF invalid revision/branch target` → Reject with stable error code
+> **âš ï¸ Sequence Safety**
+> - `IF thoughtNumber skips expected step` â†’ Reject (`ERR_SEQUENCE`)
+> - `IF invalid revision/branch target` â†’ Reject with stable error code
 
 ```typescript
 {
@@ -100,10 +101,10 @@ Add this to your MCP settings file:
 ### 2. `think_batch`
 *High-velocity reasoning.* Submit a complete chain (1-30 thoughts) at once.
 
-> **⚠️ Constraints**
-> - `IF similarity > 60%` → Reject ("Stagnation")
-> - `IF thought < 50 chars` → Reject ("Too short")
-> - `IF avg_confidence < 4` → Warning issued
+> **âš ï¸ Constraints**
+> - `IF similarity > 60%` â†’ Reject ("Stagnation")
+> - `IF thought < 50 chars` â†’ Reject ("Too short")
+> - `IF avg_confidence < 4` â†’ Warning issued
 
 ```typescript
 {
@@ -122,10 +123,29 @@ Add this to your MCP settings file:
 }
 ```
 
-### 3. `think_logic`
+### 3. `think_cycle`
+*Adaptive loop with hard quality gate.* Forces deeper reasoning before finalization.
+
+**Actions:** `start` -> `step` -> `status` -> `finalize` (or `reset`)
+
+```typescript
+{
+  action: 'start' | 'step' | 'status' | 'finalize' | 'reset',
+  sessionId?: string,               // required except start
+  goal?: string,                    // required for start
+  thought?: string,                 // required for step
+  thoughtType?: 'decompose' | 'alternative' | 'critique' | 'synthesis' | 'verification' | 'revision',
+  finalAnswer?: string,             // required for finalize
+  backendMode?: 'auto' | 'independent' | 'think',
+  maxLoops?: number,                // 10-30, default 20
+  showTrace?: boolean
+}
+```
+
+### 4. `think_logic`
 *The Architect.* Generates a strict thinking methodology for complex analysis.
 
-**Output Phases:** `CHAIN MAPPING` → `CRACK HUNTING` → `STANDARD BENCHMARK` → `ACTION PLANNING`
+**Output Phases:** `CHAIN MAPPING` â†’ `CRACK HUNTING` â†’ `STANDARD BENCHMARK` â†’ `ACTION PLANNING`
 
 ```typescript
 {
@@ -136,13 +156,13 @@ Add this to your MCP settings file:
 }
 ```
 
-### 4. `think_recall`
+### 5. `think_recall`
 *The Memory Bank.* Search current session or past insights.
 
 **Best Practices:**
-- `BEFORE complex_task` → Check `scope: 'insights'`
-- `IF repeating_logic` → Check for dead ends
-- `IF unsure` → Verify context
+- `BEFORE complex_task` â†’ Check `scope: 'insights'`
+- `IF repeating_logic` â†’ Check for dead ends
+- `IF unsure` â†’ Verify context
 
 ```typescript
 {
@@ -153,13 +173,13 @@ Add this to your MCP settings file:
 }
 ```
 
-### 5. `think_done` & `think_reset`
+### 6. `think_done` & `think_reset`
 - **`think_done`**: Finalize session. Validates gaps, blockers, and confidence levels.
 - **`think_reset`**: Wipe the slate clean. *(Use only if task context changes completely).*
 
 ---
 
-## ✅ Quality Gates
+## âœ… Quality Gates
 
 Before release:
 
@@ -177,10 +197,11 @@ npm run eval:local
 
 - Session and insights data are stored in user data directory (`~/.think-mcp` by default).
 - Override path via environment variable: `THINK_MCP_DATA_DIR`.
+- Hard quality policy baseline: `docs/quality/HARD_QUALITY_STANDARD.md` (release-gated).
 
 ---
 
-## 💡 Intelligent Systems
+## ðŸ’¡ Intelligent Systems
 
 ### The Nudge System
 *The server watches your back.*
@@ -203,10 +224,20 @@ npm run eval:local
 
 ---
 
-## 🔄 Changelog
+## ðŸ”„ Changelog
 
 <details open>
-<summary><b>v5.1.0 (Current)</b></summary>
+<summary><b>v5.5.0 (Current)</b></summary>
+
+- **New Tool**: `think_cycle` for adaptive external reasoning with hard quality gate.
+- **Hard Quality Standard**: Added release-gated policy baseline from `NEED_ADD`.
+- **Validation Expansion**: Added strict eval suites for autonomy quality, safety gates, and bounded retries.
+- **Interop**: `think_cycle` supports `auto`/`independent`/`think` backend modes with controlled fallback.
+
+</details>
+
+<details>
+<summary><b>v5.1.0</b></summary>
 
 - **Imperative Prompts**: Switched to IF/THEN style instructions.
 - **Performance**: ~55% Token Reduction per request.
@@ -231,5 +262,5 @@ npm run eval:local
 ---
 
 <div align="center">
-  <sub>MIT License • Created by @gofman3</sub>
+  <sub>MIT License â€¢ Created by @gofman3</sub>
 </div>

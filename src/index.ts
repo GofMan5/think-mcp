@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Think Module MCP Server v5.1.0
- * Streamlined thinking tools: 6 tools
+ * Think Module MCP Server v5.5.0
+ * Streamlined thinking tools: 7 tools
  * 
+ * v5.5.0: Added think_cycle + hard quality standard gates
  * v5.1.0: Imperative prompts (IF/THEN style, -55% tokens)
  * v4.7.0: Added think_logic for deep logical analysis
  * v4.6.0: Added NudgeService for proactive micro-prompts
@@ -13,6 +14,7 @@
  * - think_done: Finish session, verify, optionally export
  * - think_recall: Search session or past insights
  * - think_reset: Clear session
+ * - think_cycle: Adaptive external reasoning cycle with hard quality gate
  * - think_logic: Deep logical analysis of any task/feature/system
  */
 
@@ -20,13 +22,22 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { ThinkingService } from './services/thinking.service.js';
-import type { QuickExtension, BurstThought, BurstConsolidation } from './types/thought.types.js';
+import { CycleService } from './services/cycle.service.js';
+import type {
+  QuickExtension,
+  BurstThought,
+  BurstConsolidation,
+  ThinkCycleInput,
+  CycleThoughtType,
+  CycleBackendMode,
+} from './types/thought.types.js';
 
 const thinkingService = new ThinkingService();
+const cycleService = new CycleService(thinkingService);
 
 const server = new McpServer({
   name: 'think-module-server',
-  version: '5.1.0',
+  version: '5.5.0',
 });
 
 // ============================================
@@ -384,7 +395,74 @@ server.registerTool('think_reset', { title: 'Think Reset', description: THINK_RE
 );
 
 // ============================================
-// 6. THINK_LOGIC - Methodology Generator for Deep Logical Analysis
+// 6. THINK_CYCLE - Adaptive external reasoning loop with hard gate
+// ============================================
+
+const THINK_CYCLE_DESCRIPTION = `Adaptive external reasoning cycle with hard quality gate.
+
+Actions:
+- start: create cycle session (adaptive required thought depth)
+- step: add thought and update quality state
+- status: inspect progress, gate, and required next work
+- finalize: approve final answer ONLY if gate passes
+- reset: remove cycle session
+
+Hard rules:
+- IF finalize fails THEN require additional thoughts (minimum 10 when budget allows)
+- IF gate not passed THEN block final answer
+- IF maxLoops reached THEN block and force scope split recommendation
+
+Interop:
+- backendMode=auto: mirror to think backend with fallback
+- backendMode=think: strict think backend mode (no fallback)
+- backendMode=independent: standalone cycle only`;
+
+const thinkCycleSchema = {
+  action: z.enum(['start', 'step', 'status', 'finalize', 'reset']).describe('Cycle action'),
+  sessionId: z.string().optional().describe('Cycle session id (required except start)'),
+  goal: z.string().min(10).optional().describe('Goal for start action'),
+  context: z.string().max(3000).optional().describe('Additional context'),
+  constraints: z.array(z.string()).max(20).optional().describe('Constraints list'),
+  thought: z.string().min(20).optional().describe('Thought content for step action'),
+  thoughtType: z.enum(['decompose', 'alternative', 'critique', 'synthesis', 'verification', 'revision']).optional().describe('Optional thought type override'),
+  confidence: z.number().min(1).max(10).optional().describe('Confidence for step thought'),
+  finalAnswer: z.string().min(30).optional().describe('Final answer candidate for finalize'),
+  backendMode: z.enum(['auto', 'independent', 'think']).optional().describe('Interop backend mode'),
+  maxLoops: z.number().int().min(10).max(30).optional().describe('Loop budget'),
+  showTrace: z.boolean().optional().describe('Show expanded trace'),
+};
+
+server.registerTool('think_cycle', { title: 'Think Cycle', description: THINK_CYCLE_DESCRIPTION, inputSchema: thinkCycleSchema },
+  async (args) => {
+    try {
+      const result = await cycleService.handle({
+        action: args.action as ThinkCycleInput['action'],
+        sessionId: args.sessionId as string | undefined,
+        goal: args.goal as string | undefined,
+        context: args.context as string | undefined,
+        constraints: args.constraints as string[] | undefined,
+        thought: args.thought as string | undefined,
+        thoughtType: args.thoughtType as CycleThoughtType | undefined,
+        confidence: args.confidence as number | undefined,
+        finalAnswer: args.finalAnswer as string | undefined,
+        backendMode: args.backendMode as CycleBackendMode | undefined,
+        maxLoops: args.maxLoops as number | undefined,
+        showTrace: args.showTrace as boolean | undefined,
+      });
+
+      const text = JSON.stringify(result, null, 2);
+      return {
+        content: [{ type: 'text' as const, text }],
+        isError: result.status === 'error',
+      };
+    } catch (error) {
+      return { content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : 'Unknown'}` }], isError: true };
+    }
+  }
+);
+
+// ============================================
+// 7. THINK_LOGIC - Methodology Generator for Deep Logical Analysis
 // ============================================
 
 import { LogicService } from './services/logic.service.js';
@@ -442,10 +520,11 @@ server.registerTool('think_logic', { title: 'Think Logic', description: THINK_LO
 async function main() {
   await thinkingService.loadSession();
   await thinkingService.loadInsights();
+  await cycleService.initialize();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Think Module MCP Server v5.1.0 running on stdio');
+  console.error('Think Module MCP Server v5.5.0 running on stdio');
 }
 
 main().catch((error) => {

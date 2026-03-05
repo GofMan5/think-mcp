@@ -1,0 +1,11 @@
+{
+  "id": "autonomy-quality",
+  "title": "Autonomy quality hardening standard",
+  "goal": "Ensure repository contains strict autonomy-quality policy imported from NEED_ADD baseline.",
+  "expectations": [
+    "Dependency-safe decomposition is required",
+    "Increment-level validation is required",
+    "Iteration self-check report is required",
+    "Threshold-based stop condition is defined"
+  ]
+}

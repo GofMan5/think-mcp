@@ -23,6 +23,7 @@ function main() {
   const indexTs = readText('src/index.ts');
   const readme = readText('README.md');
   const publish = readText('.github/workflows/publish.yml');
+  const qualityStandard = readText('docs/quality/HARD_QUALITY_STANDARD.md');
 
   // 1) Required scripts exist.
   const requiredScripts = [
@@ -43,7 +44,7 @@ function main() {
   );
 
   // 2) Tool registration completeness.
-  const requiredTools = ['think', 'think_batch', 'think_done', 'think_recall', 'think_reset', 'think_logic'];
+  const requiredTools = ['think', 'think_batch', 'think_done', 'think_recall', 'think_reset', 'think_cycle', 'think_logic'];
   const registeredTools = [...indexTs.matchAll(/registerTool\('([^']+)'/g)].map((m) => m[1]);
   const missingTools = requiredTools.filter((tool) => !registeredTools.includes(tool));
   addCheck(
@@ -70,6 +71,11 @@ function main() {
     'session-persistence',
     'runtime-storage-consistency',
     'insights-consistency',
+    'adaptive-cycle-gate',
+    'think-interop-fallback',
+    'autonomy-quality',
+    'safety-gates',
+    'bounded-retries',
     'schema-readme-consistency',
     'quality-speed-optimization',
     'security-baseline',
@@ -145,6 +151,25 @@ function main() {
     'Insights FIFO eviction and load normalization keep pattern map consistent',
     hasEvictionDecrement && hasPatternRebuildOnLoad,
     `evictionDecrement=${hasEvictionDecrement}, rebuildOnLoad=${hasPatternRebuildOnLoad}`
+  );
+
+  // 9) Hard quality standard imported from NEED_ADD and enforced.
+  const qualitySignals = {
+    hasAutonomyLoop: /decompose work into dependency-safe units/i.test(qualityStandard)
+      && /iteration self-check report/i.test(qualityStandard)
+      && /quality threshold:\s*\*\*90\/100\*\*/i.test(qualityStandard),
+    hasSafetyGates: /stop-on-failure/i.test(qualityStandard)
+      && /report error -> propose fix -> request approval -> apply fix/i.test(qualityStandard)
+      && /no hidden auto-fix/i.test(qualityStandard),
+    hasBoundedRetries: /max 3 self-improvement retries per component/i.test(qualityStandard)
+      && /do not run unbounded retry loops/i.test(qualityStandard)
+      && /escalate with a gap report/i.test(qualityStandard),
+  };
+  addCheck(
+    'hard-quality-standard',
+    'Hard quality standard is documented and contains mandatory policy blocks',
+    qualitySignals.hasAutonomyLoop && qualitySignals.hasSafetyGates && qualitySignals.hasBoundedRetries,
+    `autonomy=${qualitySignals.hasAutonomyLoop}, safety=${qualitySignals.hasSafetyGates}, retries=${qualitySignals.hasBoundedRetries}`
   );
 
   const failed = checks.filter((c) => !c.pass);
