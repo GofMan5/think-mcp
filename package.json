@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GofMan5/think-mcp.git"
+    "url": "git+https://github.com/GofMan5/think-mcp.git"
   },
   "homepage": "https://github.com/GofMan5/think-mcp#readme",
   "bugs": {
@@ -26,7 +26,7 @@
   ],
   "main": "dist/index.js",
   "bin": {
-    "think-mcp": "./dist/index.js"
+    "think-mcp": "dist/index.js"
   },
   "files": [
     "dist",
