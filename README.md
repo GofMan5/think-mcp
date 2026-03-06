@@ -1,59 +1,59 @@
-﻿<div align="center">
+<div align="center">
 
-# ðŸ§  Think MCP
+# Think MCP
 
-**Structured Sequential Thinking Server for LLMs**
+**Structured reasoning tools for MCP-compatible LLM clients**
 
 [![npm version](https://img.shields.io/npm/v/@gofman3/think-mcp?style=flat-square&color=cb3837)](https://www.npmjs.com/package/@gofman3/think-mcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
-[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blueviolet?style=flat-square)](https://modelcontextprotocol.io/)
+[![license](https://img.shields.io/badge/license-MIT-f5c542?style=flat-square)](https://opensource.org/licenses/MIT)
+[![mcp](https://img.shields.io/badge/MCP-compatible-111827?style=flat-square)](https://modelcontextprotocol.io/)
+[![release gates](https://img.shields.io/badge/release-validated-1f7a5c?style=flat-square)](#quality-and-release-gates)
 
-<p align="center">
-  <b>Break down complex problems. Branch out ideas. Remember insights.</b><br>
-  Designed for LLMs to think deeper, smarter, and more efficiently.
-</p>
+Reason step by step, branch when needed, block weak finals, and keep useful memory across sessions.
 
-[Quick Start](#-quick-start) â€¢ [Tools](#-tools-reference) â€¢ [Features](#-features) â€¢ [Changelog](#-changelog)
+[Install](#install) | [Tools](#toolset) | [think_cycle](#think_cycle) | [Quality Gates](#quality-and-release-gates) | [Changelog](#changelog)
 
 </div>
 
 ---
 
-## ðŸ“– Overview
+## Why this exists
 
-**Think MCP** transforms how LLMs approach problem-solving. It's not just a tool; it's a cognitive framework that enables:
-- **Sequential Reasoning**: Step-by-step problem decomposition.
-- **Branching & Revision**: Ability to backtrack, fork thoughts, and correct mistakes.
-- **Deep Analysis**: Built-in methodology generator for rigorous code and logic auditing.
-- **Long-term Memory**: Cross-session recall of insights and dead ends.
+Most LLM workflows fail in predictable ways:
 
----
+- They answer too early.
+- They stay linear when the task needs alternatives or critique.
+- They lose earlier insights between steps.
+- They finish with confidence that is not backed by verification.
 
-## âœ¨ Features
+Think MCP adds an external reasoning layer for those failures. It does not replace the model's intelligence. It constrains and structures the way that intelligence is used.
 
-| Feature | Description |
-| :--- | :--- |
-| **ðŸš€ Efficient Thinking** | **Imperative Prompts (v5.1)** reduce token usage by ~55% using IF/THEN logic. |
-| **âš¡ï¸ Burst Mode** | Submit up to **30 thoughts** in a single API call with `think_batch`. |
-| **ðŸ§  Methodology Generator** | On-demand deep analysis frameworks (Chain Mapping, Crack Hunting, etc.) via `think_logic`. |
-| **Adaptive Cycle** | `think_cycle` enforces hard quality gates before allowing final answer. |
-| **ðŸ’¾ Smart Memory** | Cross-session learning via `think_recall` and auto-save with 24h retention. |
-| **ðŸ”” Nudge System** | Proactive micro-prompts to detect low confidence, tunnel vision, or missed steps. |
-| **ðŸŒ³ Branching** | Explore alternative paths without losing context. |
+## What is in 5.5.1
 
----
+- Fixed mojibake and broken runtime coaching text.
+- Refreshed the README and aligned it with the current toolset.
+- Kept the `think_cycle` hard-gate workflow introduced in `5.5.0`.
+- Preserved release validation, eval coverage, and hard quality policy checks.
 
-## ðŸš€ Quick Start
+## Core model
 
-### Installation
+Think MCP combines three layers:
+
+| Layer | Role | Outcome |
+| :--- | :--- | :--- |
+| `think` / `think_batch` | Capture reasoning steps | Better decomposition, branching, revisions |
+| `think_cycle` | Enforce adaptive depth and hard final gate | Blocks shallow or weak final answers |
+| Recall + coaching + validation | Preserve useful context and warn on weak patterns | Better consistency and fewer dead-end sessions |
+
+## Install
+
+### Run directly
 
 ```bash
-npx @gofman3/think-mcp
+npx -y @gofman3/think-mcp
 ```
 
-### MCP Configuration
-
-Add this to your MCP settings file:
+### MCP config
 
 ```json
 {
@@ -66,201 +66,239 @@ Add this to your MCP settings file:
 }
 ```
 
----
+### Local development
 
-## ðŸ› ï¸ Tools Reference
-
-### 1. `think`
-*The core unit of reasoning.* Adds a single thought to the chain.
-
-> **âš ï¸ Sequence Safety**
-> - `IF thoughtNumber skips expected step` â†’ Reject (`ERR_SEQUENCE`)
-> - `IF invalid revision/branch target` â†’ Reject with stable error code
-
-```typescript
-{
-  thought: string,             // The reasoning content
-  thoughtNumber: number,       // Current step index
-  totalThoughts: number,       // Estimated total steps
-  nextThoughtNeeded: boolean,  // Is the chain complete?
-  confidence?: number,         // Score 1-10
-  goal?: string,               // Required for the first thought
-  subSteps?: string[],         // Breakdown of current step (max 5)
-  alternatives?: string[],     // Other approaches considered (max 5)
-  quickExtension?: {           // Immediate micro-actions
-    type: 'critique' | 'elaboration' | 'correction' | 'innovation' | 'polish',
-    content: string,
-    impact?: 'low' | 'medium' | 'high' | 'blocker'
-  },
-  isRevision?: boolean,        // Is this correcting a previous step?
-  revisesThought?: number,     // Which step is being fixed?
-  branchId?: string            // For branching paths
-}
+```bash
+npm install
+npm run build
+npm test
 ```
 
-### 2. `think_batch`
-*High-velocity reasoning.* Submit a complete chain (1-30 thoughts) at once.
+## Toolset
 
-> **âš ï¸ Constraints**
-> - `IF similarity > 60%` â†’ Reject ("Stagnation")
-> - `IF thought < 50 chars` â†’ Reject ("Too short")
-> - `IF avg_confidence < 4` â†’ Warning issued
+| Tool | Purpose | Best use |
+| :--- | :--- | :--- |
+| `think` | Add one structured reasoning step | Medium-complexity tasks that need guided progression |
+| `think_batch` | Submit multiple reasoning steps at once | Fast batch decomposition or prebuilt chains |
+| `think_cycle` | Adaptive reasoning state machine with hard quality gate | High-risk or high-complexity tasks |
+| `think_logic` | Generate strict analysis methodology | Audits, architecture review, deep technical analysis |
+| `think_recall` | Search current session or stored insights | Reuse patterns, avoid repeating dead ends |
+| `think_done` | Finalize a session with validation | Controlled session completion |
+| `think_reset` | Clear current session state | Hard context shift only |
 
-```typescript
-{
-  goal: string,               // Min 10 chars
-  thoughts: Array<{           // List of thought objects
-    thoughtNumber: number,
-    thought: string,          // 50-1000 chars
-    confidence?: number,
-    // ... other standard fields
-  }>,
-  consolidation?: {
-    winningPath: number[],
-    summary: string,
-    verdict: 'ready' | 'needs_more_work'
-  }
-}
-```
+## `think_cycle`
 
-### 3. `think_cycle`
-*Adaptive loop with hard quality gate.* Forces deeper reasoning before finalization.
+`think_cycle` is the main depth-control tool in the current release.
 
-**Actions:** `start` -> `step` -> `status` -> `finalize` (or `reset`)
+It runs a session as a state machine:
 
-```typescript
+`start -> step -> status -> finalize`
+
+If the reasoning quality is weak, `finalize` does not silently pass. It blocks completion and returns concrete next prompts plus a required minimum of additional thoughts.
+
+### Key behavior
+
+- Adaptive required depth based on goal complexity and risk markers.
+- Hard gate for phase coverage: `decompose`, `alternative`, `critique`, `synthesis`, `verification`.
+- Quality score with penalties for repetition, weak verification, and unstable confidence.
+- Fallback interop with the regular `think` backend when `backendMode=auto`.
+- Loop budget control to avoid infinite cost and latency growth.
+
+### Input shape
+
+```ts
 {
   action: 'start' | 'step' | 'status' | 'finalize' | 'reset',
-  sessionId?: string,               // required except start
-  goal?: string,                    // required for start
-  thought?: string,                 // required for step
+  sessionId?: string,
+  goal?: string,
+  context?: string,
+  constraints?: string[],
+  thought?: string,
   thoughtType?: 'decompose' | 'alternative' | 'critique' | 'synthesis' | 'verification' | 'revision',
-  finalAnswer?: string,             // required for finalize
+  confidence?: number,
+  finalAnswer?: string,
   backendMode?: 'auto' | 'independent' | 'think',
-  maxLoops?: number,                // 10-30, default 20
+  maxLoops?: number,
   showTrace?: boolean
 }
 ```
 
-### 4. `think_logic`
-*The Architect.* Generates a strict thinking methodology for complex analysis.
+### Output shape
 
-**Output Phases:** `CHAIN MAPPING` â†’ `CRACK HUNTING` â†’ `STANDARD BENCHMARK` â†’ `ACTION PLANNING`
-
-```typescript
+```ts
 {
-  target: string,              // The subject of analysis (Min 10 chars)
-  depth?: 'quick' | 'standard' | 'deep',
-  focus?: ('security' | 'performance' | 'reliability' | 'ux' | 'data-flow')[],
-  stack?: ('nestjs' | 'react' | 'redis' | 'nextjs' | /* etc */)[]
+  status: 'in_progress' | 'blocked' | 'ready' | 'completed' | 'error',
+  sessionId: string,
+  loop: { current: number, max: number, required: number, remaining: number },
+  quality: {
+    overall: number,
+    coverage: number,
+    critique: number,
+    verification: number,
+    diversity: number,
+    confidenceStability: number
+  },
+  gate: { passed: boolean, reasonCodes: string[] },
+  requiredMoreThoughts: number,
+  nextPrompts: string[],
+  shortTrace: string[],
+  finalApprovedAnswer?: string
 }
 ```
 
-### 5. `think_recall`
-*The Memory Bank.* Search current session or past insights.
+### Example flow
 
-**Best Practices:**
-- `BEFORE complex_task` â†’ Check `scope: 'insights'`
-- `IF repeating_logic` â†’ Check for dead ends
-- `IF unsure` â†’ Verify context
-
-```typescript
+```ts
+// 1. Start
 {
-  query: string,
-  scope?: 'session' | 'insights',
-  searchIn?: 'thoughts' | 'extensions' | 'alternatives' | 'all',
-  limit?: number
+  action: 'start',
+  goal: 'Design a safe migration from Redis session cache to Postgres-backed sessions',
+  constraints: ['zero logout spike', 'rollback in under 5 minutes'],
+  backendMode: 'auto'
+}
+
+// 2. Add steps
+{
+  action: 'step',
+  sessionId: 'cycle_xxx',
+  thought: 'Break the migration into dual-write, read-fallback, rollout metrics, and rollback paths.'
+}
+
+// 3. Try to finalize
+{
+  action: 'finalize',
+  sessionId: 'cycle_xxx',
+  finalAnswer: 'We should migrate in phases and monitor it carefully...'
 }
 ```
 
-### 6. `think_done` & `think_reset`
-- **`think_done`**: Finalize session. Validates gaps, blockers, and confidence levels.
-- **`think_reset`**: Wipe the slate clean. *(Use only if task context changes completely).*
+Typical blocked response:
 
----
+```ts
+{
+  status: 'blocked',
+  gate: { passed: false, reasonCodes: ['MISSING_VERIFICATION', 'LOW_DIVERSITY'] },
+  requiredMoreThoughts: 10,
+  nextPrompts: [
+    'List concrete rollback failure modes.',
+    'Verify whether session consistency breaks during dual-write.',
+    'Compare at least two rollout strategies.'
+  ]
+}
+```
 
-## âœ… Quality Gates
+## Other tools
 
-Before release:
+### `think`
+
+Use when you want incremental reasoning with revisions, branches, substeps, and quick extensions.
+
+```ts
+{
+  thought: 'The bug likely comes from stale branch state after retry.',
+  thoughtNumber: 3,
+  totalThoughts: 7,
+  nextThoughtNeeded: true,
+  confidence: 6,
+  quickExtension: {
+    type: 'critique',
+    content: 'Verify whether retry state is recreated or reused.'
+  }
+}
+```
+
+### `think_batch`
+
+Use when you already know the rough chain and want to submit it in one call.
+
+```ts
+{
+  goal: 'Audit deployment rollback flow',
+  thoughts: [
+    { thoughtNumber: 1, thought: 'Identify entry points for rollout state changes.' },
+    { thoughtNumber: 2, thought: 'Trace rollback triggers and timeout behavior.' }
+  ]
+}
+```
+
+### `think_logic`
+
+Use for strict methodology generation before a deep audit.
+
+```ts
+{
+  target: 'Review the payment retry pipeline for consistency and failure isolation',
+  depth: 'deep',
+  focus: ['reliability', 'performance', 'data-flow']
+}
+```
+
+### `think_recall`
+
+Use before starting a familiar class of problem.
+
+```ts
+{
+  query: 'rollback strategy cache migration',
+  scope: 'insights',
+  searchIn: 'all',
+  limit: 5
+}
+```
+
+## Quality and release gates
+
+Release verification is built into the repo:
 
 ```bash
 npm run validate:release
 ```
 
-Local hardening eval report:
+Main checks:
 
-```bash
-npm run eval:local
-```
+- TypeScript typecheck
+- Unit tests
+- Local eval scenarios
+- Repo structure validation
+- Security audit
+- Hard quality baseline in `docs/quality/HARD_QUALITY_STANDARD.md`
 
-### Runtime Storage
+## Runtime storage
 
-- Session and insights data are stored in user data directory (`~/.think-mcp` by default).
-- Override path via environment variable: `THINK_MCP_DATA_DIR`.
-- Hard quality policy baseline: `docs/quality/HARD_QUALITY_STANDARD.md` (release-gated).
+- Default data directory: `~/.think-mcp`
+- Override with `THINK_MCP_DATA_DIR`
+- `think_cycle` sessions persist in runtime storage with TTL cleanup
 
----
+## Package links
 
-## ðŸ’¡ Intelligent Systems
+- npm: [@gofman3/think-mcp](https://www.npmjs.com/package/@gofman3/think-mcp)
+- repo: [GofMan5/think-mcp](https://github.com/GofMan5/think-mcp)
 
-### The Nudge System
-*The server watches your back.*
+## Changelog
 
-| Trigger Pattern | System Nudge |
-| :--- | :--- |
-| `confidence < 5` | "Low confidence. Validate?" |
-| `3+ thoughts` w/o alternatives | "No alternatives. Tunnel vision?" |
-| Complex goal w/o subSteps | "Complex goal, no breakdown. Decompose?" |
-| Unresolved blocker | "Blocker unresolved. Fix first." |
+### v5.5.1
 
-### Complexity Budget
-*Recommended tool usage based on task size.*
+- Fixed broken mojibake output in runtime coaching strings.
+- Rebuilt and refreshed README for the current toolset and quality model.
+- Released documentation and packaging cleanup on top of `5.5.0`.
 
-| Task Difficulty | Thoughts | Recommended Tool |
-| :--- | :--- | :--- |
-| **Simple** | 0-2 | *Skip (Direct Answer)* |
-| **Medium** | 3-7 | `think` (Step-by-step) |
-| **Complex** | 8-30 | `think_batch` (Burst mode) |
+### v5.5.0
 
----
+- Added `think_cycle` for adaptive external reasoning with hard quality gates.
+- Added release-gated hard quality policy based on `NEED_ADD`.
+- Added eval scenarios for cycle gating, fallback behavior, autonomy quality, safety gates, and bounded retries.
 
-## ðŸ”„ Changelog
+### v5.1.0
 
-<details open>
-<summary><b>v5.5.0 (Current)</b></summary>
+- Switched prompt style toward imperative IF/THEN instructions.
+- Reduced token overhead significantly for common reasoning flows.
 
-- **New Tool**: `think_cycle` for adaptive external reasoning with hard quality gate.
-- **Hard Quality Standard**: Added release-gated policy baseline from `NEED_ADD`.
-- **Validation Expansion**: Added strict eval suites for autonomy quality, safety gates, and bounded retries.
-- **Interop**: `think_cycle` supports `auto`/`independent`/`think` backend modes with controlled fallback.
+### v5.0.0
 
-</details>
-
-<details>
-<summary><b>v5.1.0</b></summary>
-
-- **Imperative Prompts**: Switched to IF/THEN style instructions.
-- **Performance**: ~55% Token Reduction per request.
-- **Optimization**: Faster parsing, less LLM overhead.
-</details>
-
-<details>
-<summary><b>v5.0.0</b></summary>
-
-- **New Tool**: `think_logic` for generating methodologies.
-- **Framework**: Added 4-phase analysis (Mapping, Cracking, Benchmarking, Planning).
-</details>
-
-<details>
-<summary><b>v4.x.x History</b></summary>
-
-- **v4.6.0**: Added NudgeService for proactive prompts.
-- **v4.5.0**: Renamed to `think`, added Cross-session insights.
-- **v4.1.0**: Introduced Burst Thinking (`think_batch`).
-</details>
+- Added `think_logic` methodology generation.
 
 ---
 
 <div align="center">
-  <sub>MIT License â€¢ Created by @gofman3</sub>
+Built for controlled reasoning, not blind verbosity.
 </div>

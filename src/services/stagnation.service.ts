@@ -22,28 +22,23 @@ export class StagnationService {
     if (thoughtHistory.length < STAGNATION_CHECK_COUNT) return undefined;
 
     const recent = thoughtHistory.slice(-STAGNATION_CHECK_COUNT);
-
-    // Jaccard similarity check - more accurate than substring comparison
-    // Use adaptive threshold: stricter as session progresses
     const adaptiveThreshold = getStagnationThreshold(thoughtHistory.length);
     const similarities = recent.map((t) => calculateJaccardSimilarity(newThought, t.thought));
     const avgSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
     const allHighlySimilar = similarities.every((s) => s >= adaptiveThreshold);
 
     if (allHighlySimilar && newThought.trim().length > 20) {
-      return `🛑 STAGNATION: Last ${STAGNATION_CHECK_COUNT} thoughts ${Math.round(avgSimilarity * 100)}% similar. Different approach needed.`;
+      return `STAGNATION: Last ${STAGNATION_CHECK_COUNT} thoughts are ${Math.round(avgSimilarity * 100)}% similar. Different approach needed.`;
     }
 
-    // Entropy check - detect low vocabulary diversity
     const newEntropy = calculateWordEntropy(newThought);
     const avgRecentEntropy =
       recent.reduce((sum, t) => sum + calculateWordEntropy(t.thought), 0) / recent.length;
 
     if (newEntropy < MIN_ENTROPY_THRESHOLD && avgRecentEntropy < MIN_ENTROPY_THRESHOLD) {
-      return `🛑 LOW ENTROPY: Vocabulary repetitive (${newEntropy.toFixed(2)}). Rephrase with different concepts.`;
+      return `LOW ENTROPY: Vocabulary repetitive (${newEntropy.toFixed(2)}). Rephrase with different concepts.`;
     }
 
-    // Check for declining confidence
     const recentWithConf = recent.filter((t) => t.confidence !== undefined);
     if (recentWithConf.length >= 3) {
       const isDecreasing = recentWithConf.every((t, i) => {
@@ -54,7 +49,7 @@ export class StagnationService {
         recentWithConf.reduce((sum, t) => sum + (t.confidence ?? 0), 0) / recentWithConf.length;
 
       if (isDecreasing && avgRecent < 5) {
-        return `⚠️ CONFIDENCE DROP: Avg ${avgRecent.toFixed(1)}. Use quickExtension:critique`;
+        return `WARNING CONFIDENCE DROP: Avg ${avgRecent.toFixed(1)}. Use quickExtension:critique`;
       }
     }
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Think Module MCP Server v5.5.0
+ * Think Module MCP Server v5.5.1
  * Streamlined thinking tools: 7 tools
  * 
+ * v5.5.1: Fixed mojibake text + refreshed README
  * v5.5.0: Added think_cycle + hard quality standard gates
  * v5.1.0: Imperative prompts (IF/THEN style, -55% tokens)
  * v4.7.0: Added think_logic for deep logical analysis
@@ -37,7 +38,7 @@ const cycleService = new CycleService(thinkingService);
 
 const server = new McpServer({
   name: 'think-module-server',
-  version: '5.5.0',
+  version: '5.5.1',
 });
 
 // ============================================
@@ -524,7 +525,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Think Module MCP Server v5.5.0 running on stdio');
+  console.error('Think Module MCP Server v5.5.1 running on stdio');
 }
 
 main().catch((error) => {

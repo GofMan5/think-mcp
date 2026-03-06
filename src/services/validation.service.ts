@@ -24,7 +24,6 @@ export class ValidationService {
     sessionThoughts: ThoughtRecord[],
     lastThoughtNumber: number
   ): ValidationResult {
-    // Validate revision target - can't revise future or non-existent thoughts
     if (input.isRevision && input.revisesThought !== undefined) {
       const targetThought = sessionThoughts.find((t) => t.thoughtNumber === input.revisesThought);
 
@@ -35,16 +34,14 @@ export class ValidationService {
         };
       }
 
-      // Check revision is meaningfully different from original
       const similarity = calculateJaccardSimilarity(input.thought, targetThought.thought);
       if (similarity > 0.85) {
         return {
           valid: false,
-          warning: `⚠️ SHALLOW: ${Math.round(similarity * 100)}% similar. Rewrite substantially.`,
+          warning: `WARNING SHALLOW: ${Math.round(similarity * 100)}% similar. Rewrite substantially.`,
         };
       }
 
-      // Check for circular revision (revision text similar to even earlier thought)
       const earlierThoughts = sessionThoughts.filter(
         (t) => t.thoughtNumber < input.revisesThought! && !t.isRevision
       );
@@ -53,18 +50,16 @@ export class ValidationService {
         if (circularSimilarity > 0.8) {
           return {
             valid: false,
-            warning: `🔄 CIRCULAR: ${Math.round(circularSimilarity * 100)}% similar to #${earlier.thoughtNumber}. New approach needed.`,
+            warning: `CIRCULAR: ${Math.round(circularSimilarity * 100)}% similar to #${earlier.thoughtNumber}. New approach needed.`,
           };
         }
       }
     }
 
-    // Allow revisions and branches to jump in sequence
     if (input.isRevision || input.branchFromThought) {
       return { valid: true };
     }
 
-    // First thought is always valid
     if (lastThoughtNumber === 0) {
       return { valid: true };
     }
@@ -87,7 +82,7 @@ export class ValidationService {
    * @param sessionThoughts - Current session thoughts
    */
   checkDuplicateStrict(input: ThoughtInput, sessionThoughts: ThoughtRecord[]): string | undefined {
-    if (input.isRevision) return undefined; // Revisions are allowed to reuse numbers
+    if (input.isRevision) return undefined;
 
     const exists = sessionThoughts.some((t) => t.thoughtNumber === input.thoughtNumber);
 
@@ -136,28 +131,20 @@ export class ValidationService {
         return { valid: false, error: `Thought #${current} not found`, disconnectedAt: current };
       }
 
-      // Build set of valid predecessors for current thought
       const validPredecessors = new Set<number>();
-
-      // Sequential predecessor (N can follow N-1)
       validPredecessors.add(current - 1);
 
-      // Branch source (if this thought branches from another)
       if (currentThought.branchFromThought) {
         validPredecessors.add(currentThought.branchFromThought);
       }
 
-      // Revision target (revision can follow the thought it revises)
       if (currentThought.isRevision && currentThought.revisesThought) {
         validPredecessors.add(currentThought.revisesThought);
-        // Also allow revision to follow the thought BEFORE the one it revises
         validPredecessors.add(currentThought.revisesThought - 1);
       }
 
-      // Special case: if previous thought was revised, current can follow the revision
       const previousThought = thoughtMap.get(previous);
       if (previousThought?.isRevision && previousThought.revisesThought) {
-        // Allow next sequential after revision target
         validPredecessors.add(previousThought.revisesThought + 1);
       }
 

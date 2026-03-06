@@ -7,7 +7,6 @@ import type {
   ThoughtRecord,
   ConsolidateInput,
   ConsolidateResult,
-  PathConnectivityResult,
 } from '../types/thought.types.js';
 import { ValidationService } from './validation.service.js';
 
@@ -31,7 +30,6 @@ export class ConsolidateService {
     const { winningPath, verdict } = input;
     const warnings: string[] = [];
 
-    // Validate: must have thoughts to consolidate
     if (sessionThoughts.length === 0) {
       return {
         status: 'error',
@@ -50,7 +48,6 @@ export class ConsolidateService {
       };
     }
 
-    // Validate: winning path must reference existing thoughts in current session
     const existingNumbers = new Set(sessionThoughts.map((t) => t.thoughtNumber));
     const invalidRefs = winningPath.filter((n) => !existingNumbers.has(n));
     if (invalidRefs.length > 0) {
@@ -71,16 +68,14 @@ export class ConsolidateService {
       };
     }
 
-    // Validate: path connectivity - thoughts must be logically connected
     const connectivityCheck = this.validationService.validatePathConnectivity(
       winningPath,
       sessionThoughts
     );
     if (!connectivityCheck.valid) {
-      warnings.push(`🚫 PATH DISCONTINUITY: ${connectivityCheck.error}`);
+      warnings.push(`ERROR PATH DISCONTINUITY: ${connectivityCheck.error}`);
     }
 
-    // Find low-confidence thoughts in winning path
     const lowConfidenceInPath = sessionThoughts
       .filter((t) => winningPath.includes(t.thoughtNumber))
       .filter((t) => t.confidence !== undefined && t.confidence < 5)
@@ -88,61 +83,57 @@ export class ConsolidateService {
 
     if (lowConfidenceInPath.length > 0) {
       warnings.push(
-        `⚠️ LOW CONFIDENCE: Your winning path includes thoughts with confidence < 5: #${lowConfidenceInPath.join(', ')}. Are you sure about these steps?`
+        `WARNING LOW CONFIDENCE: Winning path includes confidence < 5 at #${lowConfidenceInPath.join(', ')}. Recheck those steps.`
       );
     }
 
-    // Check ignored thoughts ratio
     const ignoredRatio = 1 - winningPath.length / sessionThoughts.length;
     if (ignoredRatio > 0.6) {
       warnings.push(
-        `⚠️ HIGH DISCARD RATE: You are ignoring ${Math.round(ignoredRatio * 100)}% of your thoughts. Ensure you haven't missed important contradictions in discarded branches.`
+        `WARNING HIGH DISCARD RATE: Ignoring ${Math.round(ignoredRatio * 100)}% of thoughts. Verify you did not drop important contradictions.`
       );
     }
 
-    // Find unaddressed BLOCKER and HIGH impact critique extensions
     const unaddressedBlockers: number[] = [];
     const unaddressedCritical: number[] = [];
 
     for (const thought of sessionThoughts) {
-      if (thought.extensions) {
-        const hasBlocker = thought.extensions.some((e) => e.impact === 'blocker');
-        const hasHighCritique = thought.extensions.some(
-          (e) => e.impact === 'high' && e.type === 'critique'
+      if (!thought.extensions) continue;
+
+      const hasBlocker = thought.extensions.some((e) => e.impact === 'blocker');
+      const hasHighCritique = thought.extensions.some(
+        (e) => e.impact === 'high' && e.type === 'critique'
+      );
+
+      if (winningPath.includes(thought.thoughtNumber)) {
+        const hasRevision = sessionThoughts.some(
+          (t) => t.isRevision && t.revisesThought === thought.thoughtNumber
         );
 
-        if (winningPath.includes(thought.thoughtNumber)) {
-          const hasRevision = sessionThoughts.some(
-            (t) => t.isRevision && t.revisesThought === thought.thoughtNumber
-          );
-
-          if (hasBlocker && !hasRevision) {
-            unaddressedBlockers.push(thought.thoughtNumber);
-          }
-          if (hasHighCritique && !hasRevision) {
-            unaddressedCritical.push(thought.thoughtNumber);
-          }
+        if (hasBlocker && !hasRevision) {
+          unaddressedBlockers.push(thought.thoughtNumber);
+        }
+        if (hasHighCritique && !hasRevision) {
+          unaddressedCritical.push(thought.thoughtNumber);
         }
       }
     }
 
     if (unaddressedBlockers.length > 0) {
       warnings.push(
-        `🚫 UNADDRESSED BLOCKERS: Thoughts #${unaddressedBlockers.join(', ')} have BLOCKER extensions but no revisions. You MUST address these before proceeding.`
+        `ERROR UNADDRESSED BLOCKERS: Thoughts #${unaddressedBlockers.join(', ')} have blocker extensions but no revisions. Address them before proceeding.`
       );
     }
 
     if (unaddressedCritical.length > 0) {
       warnings.push(
-        `⚠️ UNADDRESSED CRITICAL: Thoughts #${unaddressedCritical.join(', ')} have HIGH impact critiques but no revisions. Address these issues with isRevision: true.`
+        `WARNING UNADDRESSED CRITICAL: Thoughts #${unaddressedCritical.join(', ')} have high-impact critiques but no revisions. Address these issues with isRevision: true.`
       );
     }
 
-    // Check for missing revisions in winningPath
     const missingRevisions: number[] = [];
     for (const thought of sessionThoughts) {
-      if (!winningPath.includes(thought.thoughtNumber)) continue;
-      if (!thought.extensions) continue;
+      if (!winningPath.includes(thought.thoughtNumber) || !thought.extensions) continue;
 
       const hasCritical = thought.extensions.some(
         (e) => (e.impact === 'high' || e.impact === 'blocker') && e.type === 'critique'
@@ -159,20 +150,18 @@ export class ConsolidateService {
 
     if (missingRevisions.length > 0) {
       warnings.push(
-        `🚫 MISSING REVISIONS IN PATH: Thoughts #${missingRevisions.join(', ')} have critical critiques with revisions, but those revisions are NOT in your winningPath. Include the revision thoughts or remove the flawed originals.`
+        `ERROR MISSING REVISIONS IN PATH: Thoughts #${missingRevisions.join(', ')} have critical critiques with revisions, but those revisions are not in winningPath. Include the revision thoughts or remove the flawed originals.`
       );
     }
 
-    // Check for empty or too short winning path
     if (winningPath.length === 0) {
-      warnings.push('⚠️ EMPTY PATH: No thoughts selected in winning path. This seems wrong.');
+      warnings.push('WARNING EMPTY PATH: No thoughts selected in winning path.');
     } else if (winningPath.length < 2 && sessionThoughts.length > 3) {
       warnings.push(
-        '⚠️ SUSPICIOUSLY SHORT PATH: Only 1 thought selected from a longer chain. Did you skip important reasoning?'
+        'WARNING SUSPICIOUSLY SHORT PATH: Only one thought selected from a longer chain. Check for skipped reasoning.'
       );
     }
 
-    // Determine if can proceed
     const hasBlockerWarnings = unaddressedBlockers.length > 0;
     const hasCriticalWarnings = unaddressedCritical.length > 0;
     const hasMissingRevisions = missingRevisions.length > 0;
@@ -185,31 +174,27 @@ export class ConsolidateService {
       !hasPathDiscontinuity &&
       warnings.length <= 1;
 
-    // Generate evaluation message
     let evaluation: string;
     if (canProceed) {
       evaluation =
-        '✅ SYNTHESIS ACCEPTED: Your reasoning chain is coherent. You may proceed to final answer.';
+        'SYNTHESIS ACCEPTED: Your reasoning chain is coherent. You may proceed to final answer.';
 
-      // v4.1.0: Save insight via callback on successful consolidation
       if (onSuccess) {
         onSuccess(winningPath, input.summary);
       }
     } else if (verdict === 'needs_more_work') {
       evaluation =
-        '🔄 ACKNOWLEDGED: You identified this needs more work. Continue with think or quickExtension.';
+        'ACKNOWLEDGED: You identified that this needs more work. Continue with think or quickExtension.';
 
-      // Record dead end via callback
       if (onDeadEnd) {
         onDeadEnd(winningPath, input.summary);
       }
     } else {
-      evaluation = `⚠️ SYNTHESIS REJECTED: ${warnings.length} issue(s) found. Address them before providing final answer.`;
+      evaluation = `SYNTHESIS REJECTED: ${warnings.length} issue(s) found. Address them before providing final answer.`;
     }
 
-    // Log consolidation
     console.error(
-      `🎯 Consolidation: verdict=${verdict}, path=[${winningPath.join(',')}], warnings=${warnings.length}, canProceed=${canProceed}`
+      `Consolidation: verdict=${verdict}, path=[${winningPath.join(',')}], warnings=${warnings.length}, canProceed=${canProceed}`
     );
 
     return {
