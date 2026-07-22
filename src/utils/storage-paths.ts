@@ -38,20 +38,22 @@ export async function migrateLegacyFile(legacyPath: string, newPath: string): Pr
   try {
     await fs.access(newPath);
     return false; // Already migrated.
-  } catch {
-    // Continue.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
   try {
     await fs.access(legacyPath);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return false; // No legacy file to migrate.
   }
 
   await fs.mkdir(dirname(newPath), { recursive: true });
   try {
     await fs.rename(legacyPath, newPath);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
     const content = await fs.readFile(legacyPath);
     await fs.writeFile(newPath, content);
     try {

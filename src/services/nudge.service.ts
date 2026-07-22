@@ -88,13 +88,13 @@ export class NudgeService {
    * Analyzes final state of session
    */
   generateBatchNudge(
-    avgConfidence: number,
+    avgConfidence: number | undefined,
     thoughtCount: number,
     hasAlternatives: boolean,
     hasBlockers: boolean
   ): string | undefined {
     if (hasBlockers) return 'Blockers unresolved.';
-    if (avgConfidence < 5) return 'Low avg confidence.';
+    if (avgConfidence !== undefined && avgConfidence < 5) return 'Low avg confidence.';
     if (thoughtCount >= 5 && !hasAlternatives) return 'No alternatives in session.';
     return undefined;
   }

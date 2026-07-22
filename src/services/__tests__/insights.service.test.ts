@@ -105,4 +105,40 @@ describe.sequential('InsightsService', () => {
     const search = await service.search('fresh', 3);
     expect(search.totalInsights).toBe(1);
   });
+
+  it('deduplicates repeated saves that share fingerprint across tool modes', async () => {
+    const InsightsService = await loadInsightsService();
+    const service = new InsightsService();
+
+    await service.saveWinningPath({
+      path: [1, 2, 3],
+      summary: 'Use staged rollout with rollback threshold checks.',
+      goal: 'Ship risky migration safely',
+      sessionLength: 3,
+      source: 'think',
+      sessionId: 'think-session-1',
+      scopeId: 'scope-1',
+    });
+
+    await service.saveWinningPath({
+      path: [1, 2, 3],
+      summary: 'Use staged rollout with rollback threshold checks.',
+      goal: 'Ship risky migration safely',
+      sessionLength: 5,
+      source: 'cycle',
+      sessionId: 'cycle-session-1',
+      scopeId: 'scope-1',
+    });
+
+    const stored = JSON.parse(await fs.readFile(join(tempDir, 'insights.json'), 'utf8')) as {
+      winningPaths: Array<{ source?: string; sessionId?: string; scopeId?: string }>;
+      totalSessions: number;
+    };
+
+    expect(stored.winningPaths).toHaveLength(1);
+    expect(stored.totalSessions).toBe(1);
+    expect(stored.winningPaths[0].source).toBe('cycle');
+    expect(stored.winningPaths[0].sessionId).toBe('cycle-session-1');
+    expect(stored.winningPaths[0].scopeId).toBe('scope-1');
+  });
 });

@@ -5,6 +5,9 @@ import {
   getThinkMcpDataFile,
 } from '../utils/storage-paths.js';
 import { SESSION_TTL_HOURS } from '../constants/index.js';
+import { ExportService } from './export.service.js';
+import { VisualizationService } from './visualization.service.js';
+import { RuntimeStateService } from './runtime-state.service.js';
 import type {
   CycleBackendMode,
   CycleGate,
@@ -15,6 +18,7 @@ import type {
   ThinkCycleInput,
   ThinkCycleResult,
   ThoughtInput,
+  ThoughtRecord,
   ThinkingResult,
 } from '../types/thought.types.js';
 
@@ -27,12 +31,12 @@ const CYCLE_MAX_MAX_LOOPS = 30;
 const CYCLE_REQUIRED_MIN = 10;
 const CYCLE_REQUIRED_MAX = 20;
 const QUALITY_GATE_THRESHOLD = 0.75;
-const TRACE_SHORT_LIMIT = 3;
 const TRACE_LONG_LIMIT = 10;
 const SHORT_THOUGHT_MIN = 60;
 const CONTRADICTION_PATTERN = /contradict|conflict|however|but now|наоборот|противореч|однако|но при этом/i;
 const RISK_MARKERS = [
   'security',
+  'secure',
   'auth',
   'payment',
   'concurrency',
@@ -40,11 +44,28 @@ const RISK_MARKERS = [
   'distributed',
   'performance',
   'rollback',
+  'безопас',
+  'платеж',
+  'конкурент',
+  'миграц',
+  'распредел',
+  'производ',
+  'откат',
 ];
 
 interface ThinkCycleBackend {
   processThought(input: ThoughtInput): ThinkingResult;
-  resetSession?: () => Promise<unknown>;
+  processThoughtInScope?: (input: ThoughtInput, scopeId: string) => ThinkingResult;
+  saveInsight?: (input: {
+    path: number[];
+    summary: string;
+    goal?: string;
+    avgConfidence?: number;
+    sessionLength: number;
+    source?: 'think' | 'cycle';
+    sessionId?: string;
+    scopeId?: string;
+  }) => Promise<unknown>;
 }
 
 interface CycleStore {
@@ -63,8 +84,6 @@ interface QualityDiagnostics {
 interface SnapshotOptions {
   expandedTrace: boolean;
   forceStatus?: ThinkCycleResult['status'];
-  finalApprovedAnswer?: string;
-  forcedGate?: CycleGate;
 }
 
 const EMPTY_QUALITY: ThinkCycleResult['quality'] = {
@@ -73,7 +92,6 @@ const EMPTY_QUALITY: ThinkCycleResult['quality'] = {
   critique: 0,
   verification: 0,
   diversity: 0,
-  confidenceStability: 0,
 };
 
 const EMPTY_KPI: ThinkCycleResult['kpi'] = {
@@ -125,38 +143,188 @@ function missingPhaseReasonCode(key: keyof CycleSession['phaseCoverage']): Cycle
 export class CycleService {
   private sessions: Map<string, CycleSession> = new Map();
   private loaded = false;
-  private fsLock: Promise<void> = Promise.resolve();
+  private mutationLock: Promise<void> = Promise.resolve();
+  private exportService = new ExportService();
+  private visualizationService = new VisualizationService();
 
-  constructor(private readonly backend?: ThinkCycleBackend) {}
+  constructor(
+    private readonly backend?: ThinkCycleBackend,
+    private readonly runtimeState?: RuntimeStateService
+  ) {}
 
   async initialize(): Promise<void> {
     await this.loadSessions();
-  }
-
-  async handle(input: ThinkCycleInput): Promise<ThinkCycleResult> {
-    await this.loadSessions();
-    this.cleanupExpiredSessions();
-
-    switch (input.action) {
-      case 'start':
-        return this.startSession(input);
-      case 'step':
-        return this.addStep(input);
-      case 'status':
-        return this.getStatus(input);
-      case 'finalize':
-        return this.finalize(input);
-      case 'reset':
-        return this.reset(input);
-      default:
-        return this.errorResult('', 'INVALID_ACTION', 'Unsupported action');
+    for (const session of this.sessions.values()) {
+      await this.retryPendingInsight(session);
     }
   }
 
-  private async withFsLock<T>(operation: () => Promise<T>): Promise<T> {
-    const currentLock = this.fsLock;
+  getSessionsForBootstrap(): CycleSession[] {
+    return Array.from(this.sessions.values()).map((session) => ({
+      ...session,
+      thoughts: session.thoughts.map((thought) => ({ ...thought })),
+      phaseCoverage: { ...session.phaseCoverage },
+      constraints: [...session.constraints],
+    }));
+  }
+
+  async reconcileRuntimeScopes(): Promise<void> {
+    if (!this.runtimeState) return;
+    await this.withMutationLock(async () => {
+      await this.loadSessions();
+
+      const activeScopeId = this.runtimeState!.getActiveScopeId();
+      const previousScopeIds = new Map<CycleSession, string | undefined>();
+      let changed = false;
+      for (const session of this.sessions.values()) {
+        const runtimeScopeId = this.runtimeState!.getScopeIdByCycleSessionId(session.sessionId);
+        if (runtimeScopeId && session.scopeId !== runtimeScopeId) {
+          previousScopeIds.set(session, session.scopeId);
+          session.scopeId = runtimeScopeId;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        try {
+          await this.saveSessions();
+        } catch (error) {
+          for (const [session, scopeId] of previousScopeIds) {
+            session.scopeId = scopeId;
+          }
+          throw error;
+        }
+      }
+
+      for (const session of this.sessions.values()) {
+        if (session.scopeId) {
+          this.runtimeState!.attachCycleSession(
+            session.scopeId,
+            session.sessionId,
+            session.goal,
+            session.createdAt,
+            session.updatedAt
+          );
+        }
+      }
+
+      if (activeScopeId) {
+        this.runtimeState!.activateScope(activeScopeId);
+      }
+      await this.runtimeState!.flush();
+    });
+  }
+
+  async getLatestSessionThoughtsForRecall(): Promise<ThoughtRecord[]> {
+    return this.withMutationLock(async () => {
+      await this.loadSessions();
+      this.cleanupExpiredSessions();
+
+      const latestSession = Array.from(this.sessions.values())
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+
+      return latestSession ? this.toRecallThoughts(latestSession) : [];
+    });
+  }
+
+  async getThoughtsForScope(scopeId: string): Promise<ThoughtRecord[]> {
+    return this.withMutationLock(async () => {
+      await this.loadSessions();
+      this.cleanupExpiredSessions();
+
+      return Array.from(this.sessions.values())
+        .filter((session) => session.scopeId === scopeId)
+        .sort((left, right) => left.createdAt - right.createdAt)
+        .flatMap((session) => this.toRecallThoughts(session));
+    });
+  }
+
+  async resetScope(scopeId: string): Promise<number> {
+    return this.withMutationLock(async () => {
+      await this.loadSessions();
+      const sessionsToDelete = Array.from(this.sessions.values())
+        .filter((session) => session.scopeId === scopeId)
+        .map((session) => session.sessionId);
+
+      const previousSessions = new Map(this.sessions);
+      for (const sessionId of sessionsToDelete) {
+        this.sessions.delete(sessionId);
+      }
+
+      if (sessionsToDelete.length > 0) {
+        try {
+          await this.saveSessions();
+        } catch (error) {
+          this.sessions = previousSessions;
+          throw error;
+        }
+        for (const sessionId of sessionsToDelete) {
+          this.runtimeState?.detachCycleSession(sessionId);
+        }
+        await this.flushRuntimeBestEffort();
+      }
+
+      return sessionsToDelete.length;
+    });
+  }
+
+  async exportSession(
+    sessionId: string,
+    options: { format?: 'markdown' | 'json'; includeMermaid?: boolean } = {}
+  ): Promise<string> {
+    await this.loadSessions();
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return options.format === 'json'
+        ? JSON.stringify({ error: 'Session not found' })
+        : '# Think Session Report\n\n*Session not found.*';
+    }
+
+    const thoughts = this.toRecallThoughts(session);
+    const includeMermaid = options.includeMermaid ?? true;
+    const mermaidDiagram = includeMermaid
+      ? this.visualizationService.generateMermaid(thoughts, new Map(), thoughts, 0)
+      : undefined;
+
+    return this.exportService.export(
+      {
+        thoughts,
+        branches: new Map(),
+        deadEnds: [],
+        sessionGoal: session.goal,
+        averageConfidence: this.computeAverageConfidence(session),
+        mermaidDiagram,
+      },
+      { ...options, includeMermaid }
+    );
+  }
+
+  async handle(input: ThinkCycleInput): Promise<ThinkCycleResult> {
+    return this.withMutationLock(async () => {
+      await this.loadSessions();
+      this.cleanupExpiredSessions();
+
+      switch (input.action) {
+        case 'start':
+          return this.startSession(input);
+        case 'step':
+          return this.addStep(input);
+        case 'status':
+          return this.getStatus(input);
+        case 'finalize':
+          return this.finalize(input);
+        case 'reset':
+          return this.reset(input);
+        default:
+          return this.errorResult('', 'INVALID_ACTION', 'Unsupported action');
+      }
+    });
+  }
+
+  private async withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+    const currentLock = this.mutationLock;
     let releaseLock: () => void;
-    this.fsLock = new Promise((resolve) => {
+    this.mutationLock = new Promise((resolve) => {
       releaseLock = resolve;
     });
 
@@ -168,22 +336,49 @@ export class CycleService {
     }
   }
 
+  private async flushRuntimeBestEffort(): Promise<void> {
+    try {
+      await this.runtimeState?.flush();
+    } catch {
+      // Cycle storage is authoritative; RuntimeState keeps dirty data for the next mutation retry.
+    }
+  }
+
   private async loadSessions(): Promise<void> {
     if (this.loaded) return;
 
     try {
       const raw = await fs.readFile(CYCLE_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw) as Partial<CycleStore>;
-      const loadedSessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
-
-      for (const session of loadedSessions) {
-        const normalized = this.normalizeSession(session);
-        if (normalized) {
-          this.sessions.set(normalized.sessionId, normalized);
-        }
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.sessions)) {
+        throw new Error('Invalid cycle store structure');
       }
-    } catch {
-      // Start with empty state if file does not exist or is invalid.
+      if (parsed.schemaVersion !== CYCLE_SCHEMA_VERSION) {
+        throw new Error(`Unsupported cycle store schemaVersion: ${String(parsed.schemaVersion)}`);
+      }
+      if (typeof parsed.savedAt !== 'string') {
+        throw new Error('Invalid cycle store savedAt');
+      }
+
+      const loadedSessions: CycleSession[] = [];
+      const sessionIds = new Set<string>();
+      for (const session of parsed.sessions) {
+        const normalized = this.normalizeSession(session);
+        if (!normalized) {
+          throw new Error('Invalid cycle session structure');
+        }
+        if (sessionIds.has(normalized.sessionId)) {
+          throw new Error(`Duplicate cycle session id: ${normalized.sessionId}`);
+        }
+        sessionIds.add(normalized.sessionId);
+        loadedSessions.push(normalized);
+      }
+      for (const session of loadedSessions) {
+        this.sessions.set(session.sessionId, session);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      // A missing store is the only valid empty-state bootstrap.
     }
 
     this.cleanupExpiredSessions();
@@ -196,57 +391,74 @@ export class CycleService {
     if (typeof candidate.sessionId !== 'string' || candidate.sessionId.trim().length === 0) return null;
     if (typeof candidate.goal !== 'string' || candidate.goal.trim().length < 10) return null;
     if (!Array.isArray(candidate.thoughts)) return null;
+    if (!Array.isArray(candidate.constraints) || candidate.constraints.length > 20) return null;
+    if (candidate.constraints.some((constraint) => typeof constraint !== 'string')) return null;
+    if (candidate.context !== undefined && typeof candidate.context !== 'string') return null;
+    if (candidate.scopeId !== undefined && (
+      typeof candidate.scopeId !== 'string' || candidate.scopeId.trim().length === 0
+    )) return null;
+    if (!Number.isFinite(candidate.createdAt) || !Number.isFinite(candidate.updatedAt)) return null;
+    if (candidate.completedAt !== undefined && (
+      !Number.isFinite(candidate.completedAt)
+      || candidate.completedAt < Number(candidate.createdAt)
+      || candidate.completedAt > Number(candidate.updatedAt)
+    )) return null;
+    if (candidate.completedAt !== undefined) {
+      if (typeof candidate.finalApprovedAnswer !== 'string' || candidate.finalApprovedAnswer.trim().length < 30) return null;
+      if (typeof candidate.insightPending !== 'boolean') return null;
+    } else if (candidate.finalApprovedAnswer !== undefined || candidate.insightPending !== undefined) {
+      return null;
+    }
+    if (!Number.isInteger(candidate.maxLoops)
+      || candidate.maxLoops! < CYCLE_MIN_MAX_LOOPS
+      || candidate.maxLoops! > CYCLE_MAX_MAX_LOOPS) return null;
+    if (!Number.isInteger(candidate.requiredThoughts)
+      || candidate.requiredThoughts! < CYCLE_REQUIRED_MIN
+      || candidate.requiredThoughts! > CYCLE_REQUIRED_MAX
+      || candidate.requiredThoughts! > candidate.maxLoops!) return null;
+    if (!this.isBackendMode(candidate.backendMode)) return null;
+    if (typeof candidate.interopFallback !== 'boolean') return null;
 
-    const thoughts: CycleThoughtRecord[] = candidate.thoughts
-      .filter((item): item is CycleThoughtRecord => !!item && typeof item === 'object')
-      .map((item) => {
-        const thoughtType = this.isCycleThoughtType(item.thoughtType) ? item.thoughtType : this.classifyThoughtType(item.thought);
-        const confidence =
-          typeof item.confidence === 'number' && Number.isFinite(item.confidence)
-            ? clamp(item.confidence, 1, 10)
-            : undefined;
-        return {
-          index: Number.isInteger(item.index) && item.index > 0 ? item.index : 1,
-          thought: typeof item.thought === 'string' ? item.thought : '',
-          thoughtType,
-          confidence,
-          timestamp: Number.isFinite(item.timestamp) ? item.timestamp : Date.now(),
-        };
-      })
-      .filter((item) => item.thought.trim().length > 0)
-      .map((item, idx) => ({ ...item, index: idx + 1 }));
-
-    const constraints = Array.isArray(candidate.constraints)
-      ? candidate.constraints.filter((c): c is string => typeof c === 'string').slice(0, 20)
-      : [];
-
-    const maxLoopsRaw =
-      typeof candidate.maxLoops === 'number' && Number.isFinite(candidate.maxLoops)
-        ? candidate.maxLoops
-        : CYCLE_DEFAULT_MAX_LOOPS;
-    const maxLoops = clamp(Math.floor(maxLoopsRaw), CYCLE_MIN_MAX_LOOPS, CYCLE_MAX_MAX_LOOPS);
-
-    const requiredThoughtsRaw =
-      typeof candidate.requiredThoughts === 'number' && Number.isFinite(candidate.requiredThoughts)
-        ? candidate.requiredThoughts
-        : CYCLE_REQUIRED_MIN;
-    const requiredThoughts = clamp(Math.floor(requiredThoughtsRaw), CYCLE_REQUIRED_MIN, CYCLE_REQUIRED_MAX);
-
-    const mode = this.isBackendMode(candidate.backendMode) ? candidate.backendMode : 'auto';
+    const thoughts: CycleThoughtRecord[] = [];
+    for (const rawThought of candidate.thoughts as unknown[]) {
+      if (!rawThought || typeof rawThought !== 'object') return null;
+      const item = rawThought as Partial<CycleThoughtRecord>;
+      if (typeof item.thought !== 'string' || item.thought.trim().length === 0) return null;
+      if (!Number.isInteger(item.index) || item.index !== thoughts.length + 1) return null;
+      if (!this.isCycleThoughtType(item.thoughtType)) return null;
+      if (item.confidence !== undefined && (
+        typeof item.confidence !== 'number'
+        || !Number.isFinite(item.confidence)
+        || item.confidence < 1
+        || item.confidence > 10
+      )) return null;
+      if (!Number.isFinite(item.timestamp)) return null;
+      thoughts.push({
+        index: item.index,
+        thought: item.thought,
+        thoughtType: item.thoughtType,
+        confidence: item.confidence,
+        timestamp: Number(item.timestamp),
+      });
+    }
 
     const session: CycleSession = {
       sessionId: candidate.sessionId,
+      scopeId: candidate.scopeId,
       goal: candidate.goal,
-      context: typeof candidate.context === 'string' ? candidate.context : undefined,
-      constraints,
-      createdAt: Number.isFinite(candidate.createdAt) ? Number(candidate.createdAt) : Date.now(),
-      updatedAt: Number.isFinite(candidate.updatedAt) ? Number(candidate.updatedAt) : Date.now(),
-      maxLoops,
-      requiredThoughts,
-      backendMode: mode,
+      context: candidate.context,
+      constraints: [...candidate.constraints],
+      createdAt: Number(candidate.createdAt),
+      updatedAt: Number(candidate.updatedAt),
+      completedAt: candidate.completedAt === undefined ? undefined : Number(candidate.completedAt),
+      finalApprovedAnswer: candidate.finalApprovedAnswer,
+      insightPending: candidate.insightPending,
+      maxLoops: candidate.maxLoops!,
+      requiredThoughts: candidate.requiredThoughts!,
+      backendMode: candidate.backendMode,
       thoughts,
       phaseCoverage: createEmptyPhaseCoverage(),
-      interopFallback: Boolean(candidate.interopFallback),
+      interopFallback: candidate.interopFallback,
     };
 
     session.phaseCoverage = this.computePhaseCoverage(session.thoughts);
@@ -254,24 +466,22 @@ export class CycleService {
   }
 
   private async saveSessions(): Promise<void> {
-    await this.withFsLock(async () => {
-      await ensureThinkMcpDataDir();
+    await ensureThinkMcpDataDir();
 
-      const data: CycleStore = {
-        schemaVersion: CYCLE_SCHEMA_VERSION,
-        sessions: Array.from(this.sessions.values()),
-        savedAt: new Date().toISOString(),
-      };
+    const data: CycleStore = {
+      schemaVersion: CYCLE_SCHEMA_VERSION,
+      sessions: Array.from(this.sessions.values()),
+      savedAt: new Date().toISOString(),
+    };
 
-      const tempFile = `${CYCLE_FILE_PATH}.tmp`;
-      try {
-        await fs.writeFile(tempFile, JSON.stringify(data, null, 2), 'utf8');
-        await fs.rename(tempFile, CYCLE_FILE_PATH);
-      } catch (error) {
-        try { await fs.unlink(tempFile); } catch { /* ignore */ }
-        console.error('Failed to save cycle sessions:', error);
-      }
-    });
+    const tempFile = `${CYCLE_FILE_PATH}.tmp`;
+    try {
+      await fs.writeFile(tempFile, JSON.stringify(data), 'utf8');
+      await fs.rename(tempFile, CYCLE_FILE_PATH);
+    } catch (error) {
+      try { await fs.unlink(tempFile); } catch { /* ignore */ }
+      throw error;
+    }
   }
 
   private cleanupExpiredSessions(): void {
@@ -280,6 +490,7 @@ export class CycleService {
     for (const [id, session] of this.sessions.entries()) {
       if (now - session.updatedAt > maxAgeMs) {
         this.sessions.delete(id);
+        this.runtimeState?.detachCycleSession(id);
       }
     }
   }
@@ -288,6 +499,11 @@ export class CycleService {
     const goal = input.goal?.trim();
     if (!goal || goal.length < 10) {
       return this.errorResult('', 'INVALID_INPUT', 'goal is required (min 10 chars)');
+    }
+
+    const requestedScopeId = input.scopeId?.trim();
+    if (requestedScopeId && this.runtimeState && !this.runtimeState.hasScope(requestedScopeId)) {
+      return this.errorResult('', 'INVALID_INPUT', `Unknown scopeId: ${requestedScopeId}`);
     }
 
     const context = input.context?.trim();
@@ -302,12 +518,20 @@ export class CycleService {
         : CYCLE_DEFAULT_MAX_LOOPS;
     const maxLoops = clamp(Math.floor(maxLoopsRaw), CYCLE_MIN_MAX_LOOPS, CYCLE_MAX_MAX_LOOPS);
     const sessionId = this.generateSessionId();
+    const scopeId = requestedScopeId
+      ?? (this.runtimeState
+        ? `scope-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        : undefined);
 
     const complexityScore = this.calculateComplexityScore(goal, context, constraints);
-    const requiredThoughts = clamp(8 + Math.round(complexityScore * 4), CYCLE_REQUIRED_MIN, CYCLE_REQUIRED_MAX);
+    const requiredThoughts = Math.min(
+      maxLoops,
+      clamp(8 + Math.round(complexityScore * 4), CYCLE_REQUIRED_MIN, CYCLE_REQUIRED_MAX)
+    );
 
     const session: CycleSession = {
       sessionId,
+      scopeId,
       goal,
       context,
       constraints,
@@ -322,9 +546,9 @@ export class CycleService {
     };
 
     if (backendMode !== 'independent') {
-      const sync = await this.resetBackendSession(backendMode);
+      const sync = this.checkBackendAvailability(backendMode);
       if (!sync.ok) {
-        return this.errorResult(sessionId, 'INTEROP_BACKEND_ERROR', sync.message ?? 'think backend reset failed');
+        return this.errorResult(sessionId, 'INTEROP_BACKEND_ERROR', sync.message ?? 'think backend unavailable');
       }
       if (sync.fallback) {
         session.interopFallback = true;
@@ -332,7 +556,16 @@ export class CycleService {
     }
 
     this.sessions.set(sessionId, session);
-    await this.saveSessions();
+    try {
+      await this.saveSessions();
+    } catch (error) {
+      this.sessions.delete(sessionId);
+      throw error;
+    }
+    if (scopeId) {
+      this.runtimeState?.attachCycleSession(scopeId, sessionId, goal, session.createdAt, session.updatedAt);
+    }
+    await this.flushRuntimeBestEffort();
 
     return this.buildSnapshot(session, {
       expandedTrace: input.showTrace === true,
@@ -350,6 +583,9 @@ export class CycleService {
     if (!session) {
       return this.errorResult(sessionId, 'SESSION_NOT_FOUND', 'Session not found');
     }
+    if (session.completedAt !== undefined) {
+      return this.errorResult(sessionId, 'SESSION_COMPLETED', 'Session is already completed; start a new cycle for more work');
+    }
 
     const thought = input.thought?.trim();
     if (!thought || thought.length < 20) {
@@ -365,7 +601,7 @@ export class CycleService {
         blocked.gate.reasonCodes.push('MAX_LOOPS_REACHED');
       }
       blocked.requiredMoreThoughts = 0;
-      blocked.nextPrompts = this.generateNextPrompts(blocked.gate.reasonCodes, blocked.quality, session, blocked.requiredMoreThoughts);
+      blocked.nextPrompts = this.generateNextPrompts(blocked.gate.reasonCodes);
       return blocked;
     }
 
@@ -376,16 +612,10 @@ export class CycleService {
       typeof input.confidence === 'number' && Number.isFinite(input.confidence)
         ? clamp(input.confidence, 1, 10)
         : undefined;
-
-    if (session.backendMode !== 'independent') {
-      const sync = this.mirrorStepToThinkBackend(session, thought, thoughtType, confidence);
-      if (!sync.ok && session.backendMode === 'think') {
-        return this.errorResult(session.sessionId, 'INTEROP_BACKEND_ERROR', sync.message ?? 'think backend rejected step');
-      }
-      if (!sync.ok && session.backendMode === 'auto') {
-        session.interopFallback = true;
-      }
-    }
+    const previousThoughts = [...session.thoughts];
+    const previousPhaseCoverage = { ...session.phaseCoverage };
+    const previousUpdatedAt = session.updatedAt;
+    const previousInteropFallback = session.interopFallback;
 
     const record: CycleThoughtRecord = {
       index: session.thoughts.length + 1,
@@ -398,7 +628,60 @@ export class CycleService {
     session.phaseCoverage = this.computePhaseCoverage(session.thoughts);
     session.updatedAt = Date.now();
     this.sessions.set(session.sessionId, session);
-    await this.saveSessions();
+    try {
+      await this.saveSessions();
+    } catch (error) {
+      session.thoughts = previousThoughts;
+      session.phaseCoverage = previousPhaseCoverage;
+      session.updatedAt = previousUpdatedAt;
+      session.interopFallback = previousInteropFallback;
+      this.sessions.set(session.sessionId, session);
+      throw error;
+    }
+
+    if (session.backendMode !== 'independent') {
+      const sync = this.mirrorStepToThinkBackend(
+        session,
+        record.index,
+        thought,
+        thoughtType,
+        confidence
+      );
+      if (!sync.ok && session.backendMode === 'think') {
+        session.thoughts = previousThoughts;
+        session.phaseCoverage = previousPhaseCoverage;
+        session.updatedAt = previousUpdatedAt;
+        session.interopFallback = previousInteropFallback;
+        this.sessions.set(session.sessionId, session);
+        await this.saveSessions();
+        return this.errorResult(session.sessionId, 'INTEROP_BACKEND_ERROR', sync.message ?? 'think backend rejected step');
+      }
+      if (!sync.ok && session.backendMode === 'auto' && !session.interopFallback) {
+        session.interopFallback = true;
+        try {
+          await this.saveSessions();
+        } catch (error) {
+          session.thoughts = previousThoughts;
+          session.phaseCoverage = previousPhaseCoverage;
+          session.updatedAt = previousUpdatedAt;
+          session.interopFallback = previousInteropFallback;
+          this.sessions.set(session.sessionId, session);
+          await this.saveSessions();
+          throw error;
+        }
+      }
+    }
+
+    if (session.scopeId) {
+      this.runtimeState?.attachCycleSession(
+        session.scopeId,
+        session.sessionId,
+        session.goal,
+        session.createdAt,
+        session.updatedAt
+      );
+    }
+    await this.flushRuntimeBestEffort();
 
     return this.buildSnapshot(session, {
       expandedTrace: input.showTrace === true,
@@ -428,6 +711,17 @@ export class CycleService {
     if (!session) {
       return this.errorResult(sessionId, 'SESSION_NOT_FOUND', 'Session not found');
     }
+    if (session.completedAt !== undefined) {
+      await this.retryPendingInsight(session);
+      const completed = this.buildSnapshot(session, { expandedTrace: input.showTrace === true });
+      if (input.exportReport) {
+        completed.exportedReport = await this.exportSession(sessionId, {
+          format: input.exportReport,
+          includeMermaid: input.includeMermaid,
+        });
+      }
+      return completed;
+    }
 
     const finalAnswer = input.finalAnswer?.trim();
     if (!finalAnswer || finalAnswer.length < 30) {
@@ -438,17 +732,59 @@ export class CycleService {
       expandedTrace: input.showTrace === true,
     });
 
-    if (snapshot.gate.passed) {
-      snapshot.status = 'completed';
+    if (
+      snapshot.gate.passed
+      && session.constraints.length > 0
+      && !input.constraintCheck?.trim()
+    ) {
+      snapshot.status = 'blocked';
+      snapshot.gate = { passed: false, reasonCodes: ['CONSTRAINT_CHECK_REQUIRED'] };
       snapshot.requiredMoreThoughts = 0;
-      snapshot.nextPrompts = [];
-      snapshot.finalApprovedAnswer = finalAnswer;
+      snapshot.nextPrompts = this.generateNextPrompts(snapshot.gate.reasonCodes);
       return snapshot;
+    }
+
+    if (snapshot.gate.passed) {
+      const previousUpdatedAt = session.updatedAt;
+      const previousFinalApprovedAnswer = session.finalApprovedAnswer;
+      const previousInsightPending = session.insightPending;
+      session.completedAt = Date.now();
+      session.updatedAt = session.completedAt;
+      session.finalApprovedAnswer = finalAnswer;
+      session.insightPending = this.backend?.saveInsight !== undefined;
+      try {
+        await this.saveSessions();
+      } catch (error) {
+        session.completedAt = undefined;
+        session.updatedAt = previousUpdatedAt;
+        session.finalApprovedAnswer = previousFinalApprovedAnswer;
+        session.insightPending = previousInsightPending;
+        throw error;
+      }
+      await this.retryPendingInsight(session);
+      if (session.scopeId) {
+        this.runtimeState?.attachCycleSession(
+          session.scopeId,
+          session.sessionId,
+          session.goal,
+          session.createdAt,
+          session.updatedAt
+        );
+      }
+      await this.flushRuntimeBestEffort();
+      const completed = this.buildSnapshot(session, { expandedTrace: input.showTrace === true });
+      if (input.exportReport) {
+        completed.exportedReport = await this.exportSession(sessionId, {
+          format: input.exportReport,
+          includeMermaid: input.includeMermaid,
+        });
+      }
+      return completed;
     }
 
     snapshot.status = 'blocked';
     snapshot.requiredMoreThoughts = this.computeRequiredMoreThoughts(session, snapshot.gate.reasonCodes, snapshot.quality);
-    snapshot.nextPrompts = this.generateNextPrompts(snapshot.gate.reasonCodes, snapshot.quality, session, snapshot.requiredMoreThoughts);
+    snapshot.nextPrompts = this.generateNextPrompts(snapshot.gate.reasonCodes);
     return snapshot;
   }
 
@@ -458,19 +794,29 @@ export class CycleService {
       return this.errorResult('', 'INVALID_INPUT', 'sessionId is required for reset');
     }
 
-    const existed = this.sessions.delete(sessionId);
-    if (existed) {
-      await this.saveSessions();
+    const session = this.sessions.get(sessionId);
+    const scopeId = session?.scopeId;
+    if (session) {
+      const previousSessions = new Map(this.sessions);
+      this.sessions.delete(sessionId);
+      try {
+        await this.saveSessions();
+      } catch (error) {
+        this.sessions = previousSessions;
+        throw error;
+      }
+      this.runtimeState?.detachCycleSession(sessionId);
+      await this.flushRuntimeBestEffort();
       return {
         status: 'completed',
         sessionId,
+        scopeId,
         loop: { ...EMPTY_LOOP, current: 0, remaining: 0 },
         quality: { ...EMPTY_QUALITY },
         kpi: { ...EMPTY_KPI },
         gate: { passed: true, reasonCodes: [] },
         requiredMoreThoughts: 0,
         nextPrompts: [],
-        shortTrace: [],
       };
     }
 
@@ -479,7 +825,10 @@ export class CycleService {
 
   private buildSnapshot(session: CycleSession, options: SnapshotOptions): ThinkCycleResult {
     const diagnostics = this.computeQuality(session);
-    const gate = options.forcedGate ?? this.evaluateGate(session, diagnostics);
+    const completed = session.completedAt !== undefined;
+    const gate = completed
+      ? { passed: true, reasonCodes: [] }
+      : this.evaluateGate(session, diagnostics);
     const loop = {
       current: session.thoughts.length,
       max: session.maxLoops,
@@ -488,19 +837,24 @@ export class CycleService {
     };
     const kpi = this.computeKpi(session, diagnostics);
 
-    const requiredMoreThoughts = gate.passed
+    const requiredMoreThoughts = completed || gate.passed
       ? 0
       : this.computeRequiredMoreThoughts(session, gate.reasonCodes, diagnostics.quality);
-    const nextPrompts = gate.passed
+    const nextPrompts = completed
       ? []
-      : this.generateNextPrompts(gate.reasonCodes, diagnostics.quality, session, requiredMoreThoughts);
+      : gate.passed
+        ? [session.constraints.length > 0
+            ? 'Next: think_cycle finalize with finalAnswer and constraintCheck — map every original constraint to evidence.'
+            : 'Next: think_cycle finalize with finalAnswer — quality gate passed.']
+        : this.generateNextPrompts(gate.reasonCodes);
 
-    const shortTrace = this.buildTrace(session, options.expandedTrace);
-    const status = options.forceStatus ?? this.deriveStatus(gate, session);
+    const shortTrace = options.expandedTrace ? this.buildTrace(session) : undefined;
+    const status = completed ? 'completed' : options.forceStatus ?? this.deriveStatus(gate, session);
 
     return {
       status,
       sessionId: session.sessionId,
+      scopeId: session.scopeId,
       loop,
       quality: diagnostics.quality,
       kpi,
@@ -508,12 +862,71 @@ export class CycleService {
       requiredMoreThoughts,
       nextPrompts,
       shortTrace,
-      finalApprovedAnswer: options.finalApprovedAnswer,
+      finalApprovedAnswer: session.finalApprovedAnswer,
       interopFallback: session.interopFallback,
     };
   }
 
+  private toRecallThoughts(session: CycleSession): ThoughtRecord[] {
+    return session.thoughts.map((thought) => ({
+      thoughtNumber: thought.index,
+      totalThoughts: session.requiredThoughts,
+      nextThoughtNeeded: thought.index < session.requiredThoughts,
+      thought: thought.thought,
+      confidence: thought.confidence,
+      timestamp: thought.timestamp,
+      sessionId: session.sessionId,
+      metadata: { source: 'cycle' },
+    }));
+  }
+
+  private computeAverageConfidence(session: CycleSession): number | undefined {
+    const values = session.thoughts
+      .map((thought) => thought.confidence)
+      .filter((value): value is number => value !== undefined);
+
+    if (values.length === 0) return undefined;
+
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return Math.round(average * 100) / 100;
+  }
+
+  private async persistInsight(session: CycleSession, finalAnswer: string): Promise<boolean> {
+    if (!this.backend?.saveInsight) return false;
+
+    try {
+      await this.backend.saveInsight({
+        path: session.thoughts.map((thought) => thought.index),
+        summary: finalAnswer,
+        goal: session.goal,
+        avgConfidence: this.computeAverageConfidence(session),
+        sessionLength: session.thoughts.length,
+        source: 'cycle',
+        sessionId: session.sessionId,
+        scopeId: session.scopeId,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to save cycle insight:', error);
+      return false;
+    }
+  }
+
+  private async retryPendingInsight(session: CycleSession): Promise<void> {
+    if (!session.insightPending || !session.finalApprovedAnswer) return;
+    if (!await this.persistInsight(session, session.finalApprovedAnswer)) return;
+
+    session.insightPending = false;
+    try {
+      await this.saveSessions();
+    } catch (error) {
+      session.insightPending = true;
+      console.error('Failed to persist cycle insight status:', error);
+    }
+  }
+
   private deriveStatus(gate: CycleGate, session: CycleSession): ThinkCycleResult['status'] {
+    if (session.completedAt !== undefined) return 'completed';
     if (gate.passed) return 'ready';
     if (session.thoughts.length >= session.maxLoops) return 'blocked';
     return 'in_progress';
@@ -552,7 +965,7 @@ export class CycleService {
     if (diagnostics.quality.diversity < 0.55) {
       reasonCodes.push('LOW_DIVERSITY');
     }
-    if (diagnostics.quality.confidenceStability < 0.45) {
+    if (diagnostics.quality.confidenceStability !== undefined && diagnostics.quality.confidenceStability < 0.45) {
       reasonCodes.push('LOW_CONFIDENCE_STABILITY');
     }
     if (diagnostics.shortThoughtRatio > 0.35) {
@@ -605,19 +1018,24 @@ export class CycleService {
     const duplicateRatio = thoughtCount > 1 ? duplicateLinks / (thoughtCount - 1) : 0;
     const diversity = clamp(avgEntropy - duplicateRatio * 0.6, 0, 1);
 
-    const confidenceValues = session.thoughts.map((t) => t.confidence ?? 6);
-    const confidenceStability = this.computeConfidenceStability(confidenceValues);
+    const confidenceValues = session.thoughts
+      .map((thought) => thought.confidence)
+      .filter((confidence): confidence is number => confidence !== undefined);
+    const confidenceStability = confidenceValues.length >= 2
+      ? this.computeConfidenceStability(confidenceValues)
+      : undefined;
 
     const shortThoughtRatio =
       session.thoughts.filter((t) => t.thought.length < SHORT_THOUGHT_MIN).length / thoughtCount;
     const contradictionSignals = session.thoughts.filter((t) => CONTRADICTION_PATTERN.test(t.thought)).length;
 
-    let overall =
+    let overall = (
       coverage * 0.3 +
       critique * 0.2 +
       verification * 0.2 +
-      diversity * 0.2 +
-      confidenceStability * 0.1;
+      diversity * 0.2
+    ) / (confidenceStability === undefined ? 0.9 : 1);
+    if (confidenceStability !== undefined) overall += confidenceStability * 0.1;
 
     overall -= shortThoughtRatio * 0.2;
     if (duplicateRatio > 0.4) {
@@ -631,7 +1049,7 @@ export class CycleService {
       critique: roundMetric(critique),
       verification: roundMetric(verification),
       diversity: roundMetric(diversity),
-      confidenceStability: roundMetric(confidenceStability),
+      confidenceStability: confidenceStability === undefined ? undefined : roundMetric(confidenceStability),
     };
 
     return {
@@ -662,8 +1080,7 @@ export class CycleService {
   }
 
   private computeConfidenceStability(values: number[]): number {
-    if (values.length === 0) return 0;
-    if (values.length === 1) return 0.65;
+    if (values.length < 2) return 0;
 
     const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
     const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
@@ -680,84 +1097,71 @@ export class CycleService {
     const remaining = Math.max(0, session.maxLoops - session.thoughts.length);
     if (remaining === 0) return 0;
 
-    const baseNeed = session.requiredThoughts - session.thoughts.length;
-    const weakBoost = this.computeWeakAreaBoost(reasonCodes, quality);
-    const requested = Math.max(10, baseNeed, weakBoost);
+    const baseNeed = Math.max(0, session.requiredThoughts - session.thoughts.length);
+    const targetedNeed = this.computeTargetedNeed(reasonCodes, quality);
+    const requested = Math.max(baseNeed, targetedNeed);
     return Math.min(remaining, requested);
   }
 
-  private computeWeakAreaBoost(reasonCodes: CycleReasonCode[], quality: ThinkCycleResult['quality']): number {
-    let boost = 0;
+  private computeTargetedNeed(reasonCodes: CycleReasonCode[], quality: ThinkCycleResult['quality']): number {
+    let need = 0;
     const missingPhases = reasonCodes.filter((code) => code.startsWith('MISSING_PHASE_')).length;
-    boost += missingPhases * 2;
-    if (reasonCodes.includes('LOW_CRITIQUE_DEPTH')) boost += 3;
-    if (reasonCodes.includes('LOW_VERIFICATION_DEPTH')) boost += 3;
-    if (reasonCodes.includes('LOW_DIVERSITY')) boost += 3;
-    if (reasonCodes.includes('LOW_OVERALL_QUALITY')) boost += 2;
-    if (quality.coverage < 0.4) boost += 2;
-    return clamp(boost, 0, 15);
-  }
+    need += missingPhases;
 
-  private generateNextPrompts(
-    reasonCodes: CycleReasonCode[],
-    quality: ThinkCycleResult['quality'],
-    session: CycleSession,
-    requiredMoreThoughts: number
-  ): string[] {
-    const prompts: string[] = [];
-
-    if (requiredMoreThoughts > 0) {
-      prompts.push(`Continue with at least ${requiredMoreThoughts} additional thoughts before finalizing.`);
+    if (reasonCodes.includes('LOW_CRITIQUE_DEPTH') && !reasonCodes.includes('MISSING_PHASE_CRITIQUE')) need += 1;
+    if (reasonCodes.includes('LOW_VERIFICATION_DEPTH') && !reasonCodes.includes('MISSING_PHASE_VERIFICATION')) need += 1;
+    if (reasonCodes.includes('LOW_DIVERSITY')) need += 1;
+    if (reasonCodes.includes('TOO_MANY_SHORT_THOUGHTS')) need += 1;
+    if (reasonCodes.includes('CONTRADICTION_SIGNAL')) need += 1;
+    if (reasonCodes.includes('LOW_CONFIDENCE_STABILITY')) need += 1;
+    if (reasonCodes.includes('LOW_OVERALL_QUALITY') && quality.overall < QUALITY_GATE_THRESHOLD && need === 0) {
+      need = 1;
     }
 
+    return clamp(need, 0, 10);
+  }
+
+  private generateNextPrompts(reasonCodes: CycleReasonCode[]): string[] {
+    if (reasonCodes.includes('CONSTRAINT_CHECK_REQUIRED')) {
+      return ['Next: retry think_cycle finalize with constraintCheck — map every original constraint to evidence or a verification step.'];
+    }
     if (reasonCodes.includes('MAX_LOOPS_REACHED')) {
-      prompts.push('Split the goal into a smaller scope and start a new cycle session.');
-      prompts.push('Preserve only top risks/decisions and continue in a focused follow-up session.');
-      return prompts.slice(0, 10);
+      return ['Next: start a new think_cycle with a smaller goal and carry over only verified decisions.'];
     }
 
     if (reasonCodes.includes('MISSING_PHASE_DECOMPOSE')) {
-      prompts.push('Decompose the goal into concrete sub-problems, dependencies, and execution order.');
+      return ['Next: think_cycle step with thoughtType="decompose" — split the goal into dependencies and an execution order.'];
     }
     if (reasonCodes.includes('MISSING_PHASE_ALTERNATIVE')) {
-      prompts.push('Generate at least two alternative approaches and compare tradeoffs explicitly.');
+      return ['Next: think_cycle step with thoughtType="alternative" — compare at least two viable approaches and their tradeoffs.'];
     }
     if (reasonCodes.includes('MISSING_PHASE_CRITIQUE') || reasonCodes.includes('LOW_CRITIQUE_DEPTH')) {
-      prompts.push('Challenge your current approach: list failure modes, hidden assumptions, and rejection criteria.');
+      return ['Next: think_cycle step with thoughtType="critique" — challenge assumptions, failure modes, and rejection criteria.'];
     }
     if (reasonCodes.includes('MISSING_PHASE_SYNTHESIS')) {
-      prompts.push('Synthesize previous thoughts into one coherent strategy with chosen path rationale.');
+      return ['Next: think_cycle step with thoughtType="synthesis" — choose one coherent path and explain the tradeoff.'];
     }
     if (reasonCodes.includes('MISSING_PHASE_VERIFICATION') || reasonCodes.includes('LOW_VERIFICATION_DEPTH')) {
-      prompts.push('Define verification: tests, metrics, observability checks, rollback triggers.');
+      return ['Next: think_cycle step with thoughtType="verification" — define tests, metrics, and rollback triggers.'];
     }
     if (reasonCodes.includes('LOW_DIVERSITY')) {
-      prompts.push('Avoid repeating wording; reframe from architecture, data-flow, and operational perspectives.');
+      return ['Next: think_cycle step with thoughtType="alternative" — add a genuinely different approach, not a rewording.'];
     }
     if (reasonCodes.includes('TOO_MANY_SHORT_THOUGHTS')) {
-      prompts.push('Use higher-detail thoughts (>80 chars) with concrete evidence and decisions.');
+      return ['Next: think_cycle step with thoughtType="revision" — replace a shallow claim with evidence and a concrete decision.'];
     }
     if (reasonCodes.includes('CONTRADICTION_SIGNAL')) {
-      prompts.push('Resolve contradictions explicitly: state what changed and why.');
+      return ['Next: think_cycle step with thoughtType="revision" — resolve the contradiction and state what changed.'];
     }
     if (reasonCodes.includes('LOW_CONFIDENCE_STABILITY')) {
-      prompts.push('Stabilize confidence by validating uncertain parts before introducing new branches.');
+      return ['Next: think_cycle step with thoughtType="verification" and confidence — validate and recalibrate the least certain claim.'];
     }
-    if (reasonCodes.includes('LOW_OVERALL_QUALITY') && quality.overall < 0.75) {
-      prompts.push('Run one focused refinement pass to improve quality score above 0.75.');
-    }
-
-    if (prompts.length === 0) {
-      prompts.push(`Continue reasoning until all phases are covered and quality reaches ${QUALITY_GATE_THRESHOLD}.`);
-    }
-
-    return prompts.slice(0, 10);
+    return ['Next: think_cycle step with thoughtType="revision" — add one distinct, evidence-backed improvement.'];
   }
 
-  private buildTrace(session: CycleSession, expanded: boolean): string[] {
-    const limit = expanded ? TRACE_LONG_LIMIT : TRACE_SHORT_LIMIT;
+  private buildTrace(session: CycleSession): string[] {
     return session.thoughts
-      .slice(-limit)
+      .slice(-TRACE_LONG_LIMIT)
       .map((thought) => {
         const trimmed = thought.thought.length > 140
           ? `${thought.thought.slice(0, 140)}...`
@@ -789,27 +1193,19 @@ export class CycleService {
     return coverage;
   }
 
-  private async resetBackendSession(mode: CycleBackendMode): Promise<{ ok: boolean; fallback?: boolean; message?: string }> {
-    if (!this.backend?.resetSession) {
+  private checkBackendAvailability(mode: CycleBackendMode): { ok: boolean; fallback?: boolean; message?: string } {
+    if (!this.backend) {
       if (mode === 'think') {
-        return { ok: false, message: 'think backend reset unavailable' };
+        return { ok: false, message: 'think backend unavailable' };
       }
       return { ok: true, fallback: mode === 'auto' };
     }
-
-    try {
-      await this.backend.resetSession();
-      return { ok: true };
-    } catch (error) {
-      if (mode === 'think') {
-        return { ok: false, message: error instanceof Error ? error.message : 'think backend reset failed' };
-      }
-      return { ok: true, fallback: true, message: error instanceof Error ? error.message : 'fallback enabled' };
-    }
+    return { ok: true };
   }
 
   private mirrorStepToThinkBackend(
     session: CycleSession,
+    thoughtNumber: number,
     thought: string,
     thoughtType: CycleThoughtType,
     confidence?: number
@@ -818,7 +1214,6 @@ export class CycleService {
       return { ok: false, message: 'think backend unavailable' };
     }
 
-    const thoughtNumber = session.thoughts.length + 1;
     const payload: ThoughtInput = {
       thought,
       nextThoughtNeeded: true,
@@ -836,10 +1231,14 @@ export class CycleService {
             impact: 'medium',
           }
         : undefined,
+      scopeId: thoughtNumber === 1 ? session.scopeId : undefined,
+      mirroredCycleSessionId: session.sessionId,
     };
 
     try {
-      const result = this.backend.processThought(payload);
+      const result = session.scopeId && this.backend.processThoughtInScope
+        ? this.backend.processThoughtInScope(payload, session.scopeId)
+        : this.backend.processThought(payload);
       if (result.isError) {
         return { ok: false, message: result.errorMessage ?? 'think backend rejected step' };
       }
@@ -895,7 +1294,6 @@ export class CycleService {
       gate: { passed: false, reasonCodes: [reason] },
       requiredMoreThoughts: 0,
       nextPrompts: [],
-      shortTrace: [],
       errorMessage: message,
     };
   }

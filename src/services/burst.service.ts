@@ -63,7 +63,7 @@ export class BurstService {
         passed: false,
         errors,
         warnings,
-        metrics: { avgConfidence: 0, avgEntropy: 0, avgLength: 0, stagnationScore: 0, thoughtCount: 0 },
+        metrics: { avgEntropy: 0, avgLength: 0, stagnationScore: 0, thoughtCount: 0 },
       };
     }
 
@@ -146,14 +146,14 @@ export class BurstService {
     // === PHASE 5: Calculate Metrics ===
     const avgLength = thoughts.length > 0 ? totalLength / thoughts.length : 0;
     const avgEntropy = thoughts.length > 0 ? totalEntropy / thoughts.length : 0;
-    const avgConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
+    const avgConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : undefined;
 
     // v5.0.1: Skip entropy warning for small batches (< 5 thoughts)
     if (avgEntropy < BURST_LIMITS.minAvgEntropy && thoughts.length >= 5) {
       warnings.push(`Low diversity: ${avgEntropy.toFixed(2)} < ${BURST_LIMITS.minAvgEntropy}`);
     }
 
-    if (avgConfidence < BURST_LIMITS.minAvgConfidence && confidenceCount > 0) {
+    if (avgConfidence !== undefined && avgConfidence < BURST_LIMITS.minAvgConfidence) {
       warnings.push(`Low confidence: ${avgConfidence.toFixed(1)} < ${BURST_LIMITS.minAvgConfidence}`);
     }
 
@@ -163,7 +163,7 @@ export class BurstService {
     }
 
     const metrics: BurstMetrics = {
-      avgConfidence: Math.round(avgConfidence * 10) / 10,
+      avgConfidence: avgConfidence === undefined ? undefined : Math.round(avgConfidence * 10) / 10,
       avgEntropy: Math.round(avgEntropy * 100) / 100,
       avgLength: Math.round(avgLength),
       stagnationScore: Math.round(stagnationScore * 100) / 100,
@@ -188,7 +188,14 @@ export class BurstService {
     errors: string[],
     warnings: string[]
   ): void {
-    const { winningPath, verdict } = consolidation;
+    const { winningPath, summary, verdict } = consolidation;
+
+    if (winningPath.length === 0) {
+      errors.push('Winning path must include at least one thought');
+    }
+    if (!summary.trim()) {
+      errors.push('Consolidation summary must not be blank');
+    }
 
     // Validate path references
     const thoughtNumbers = new Set(thoughts.map(t => t.thoughtNumber));
@@ -197,7 +204,7 @@ export class BurstService {
       errors.push(`Invalid winning path references: ${invalidRefs.join(', ')}`);
     }
 
-    // Validate path connectivity (WARNING, not ERROR)
+    // Validate path connectivity
     if (winningPath.length > 1 && invalidRefs.length === 0) {
       const thoughtMap = new Map(thoughts.map(t => [t.thoughtNumber, t]));
       const pathGaps: string[] = [];
@@ -222,7 +229,7 @@ export class BurstService {
       }
 
       if (pathGaps.length > 0) {
-        warnings.push(`Path gaps: ${pathGaps.join(', ')}. Use branches or include intermediate thoughts.`);
+        errors.push(`Path gaps: ${pathGaps.join(', ')}. Use branches or include intermediate thoughts.`);
       }
     }
 

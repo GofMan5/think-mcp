@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -12,6 +12,7 @@ const ENV_KEY = 'THINK_MCP_DATA_DIR';
 
 afterEach(() => {
   delete process.env[ENV_KEY];
+  vi.restoreAllMocks();
 });
 
 describe('storage-paths utils', () => {
@@ -38,6 +39,21 @@ describe('storage-paths utils', () => {
     expect(migratedContent).toBe('{"ok":true}');
 
     await expect(fs.access(legacyFile)).rejects.toBeTruthy();
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it('propagates migration access failures without moving either file', async () => {
+    const base = await fs.mkdtemp(join(tmpdir(), 'think-mcp-storage-test-'));
+    const legacyFile = join(base, 'legacy.json');
+    const newFile = join(base, 'new.json');
+    await fs.writeFile(legacyFile, '{"safe":true}', 'utf8');
+    const accessError = Object.assign(new Error('access denied'), { code: 'EACCES' });
+    vi.spyOn(fs, 'access').mockRejectedValueOnce(accessError);
+
+    await expect(migrateLegacyFile(legacyFile, newFile)).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await fs.readFile(legacyFile, 'utf8')).toBe('{"safe":true}');
+    await expect(fs.access(newFile)).rejects.toMatchObject({ code: 'ENOENT' });
+
     await fs.rm(base, { recursive: true, force: true });
   });
 });

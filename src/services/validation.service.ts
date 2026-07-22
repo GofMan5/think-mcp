@@ -24,6 +24,13 @@ export class ValidationService {
     sessionThoughts: ThoughtRecord[],
     lastThoughtNumber: number
   ): ValidationResult {
+    if (lastThoughtNumber === 0 && input.thoughtNumber !== 1) {
+      return {
+        valid: false,
+        warning: `[ERR_SEQUENCE] Expected #1, got #${input.thoughtNumber}.`,
+      };
+    }
+
     if (input.isRevision && input.revisesThought !== undefined) {
       const targetThought = sessionThoughts.find((t) => t.thoughtNumber === input.revisesThought);
 

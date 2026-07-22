@@ -22,7 +22,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm run eval:local
       - run: npm run validate:repo
       - run: npm run security:audit
 

@@ -40,6 +40,15 @@ describe('ValidationService', () => {
       expect(result.valid).toBe(true);
     });
 
+    it('should reject a non-first thought when no sequence exists', () => {
+      const input = createInput('Second thought without a first thought', 2);
+      const result = service.validateSequence(input, [], 0);
+      expect(result).toEqual({
+        valid: false,
+        warning: '[ERR_SEQUENCE] Expected #1, got #2.',
+      });
+    });
+
     it('should accept sequential thoughts', () => {
       const history = [createThought('First', 1)];
       const input = createInput('Second', 2);

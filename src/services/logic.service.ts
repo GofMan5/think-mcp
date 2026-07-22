@@ -10,19 +10,10 @@
  * - But: "For each data access, ask: is this inside a loop?" (thinking pattern)
  */
 
-import type {
-  LogicAnalysisInput,
-  LogicAnalysisResult,
-  LogicDepth,
-  LogicFocus,
-  LogicMethodology,
-  MethodologySection,
-  TechStack,
-} from '../types/thought.types.js';
+import type { LogicAnalysisInput, LogicFocus, TechStack } from '../types/thought.types.js';
 
 const LOGIC_LIMITS = {
   maxTargetLength: 5000,
-  maxContextLength: 3000,
   minTargetLength: 10,
 };
 
@@ -193,171 +184,55 @@ const STACK_PROMPTS: Record<TechStack, string[]> = {
   nextjs: ['Remember: Server vs Client components, revalidation strategy, minimize client JS'],
 };
 
-export class LogicService {
-  /**
-   * Generate thinking methodology for the target
-   */
-  analyze(input: LogicAnalysisInput): LogicAnalysisResult {
-    const warnings: string[] = [];
-    
-    // Validation
-    if (!input.target || input.target.trim().length < LOGIC_LIMITS.minTargetLength) {
-      return this.errorResult(`Target must be at least ${LOGIC_LIMITS.minTargetLength} characters`);
-    }
+function appendSection(lines: string[], section: typeof METHODOLOGY[keyof typeof METHODOLOGY], content = section.method): void {
+  lines.push(`## ${section.title}`, `*${section.purpose}*`, '', ...content, '');
+}
 
-    let target = input.target.trim();
-    if (target.length > LOGIC_LIMITS.maxTargetLength) {
-      target = target.substring(0, LOGIC_LIMITS.maxTargetLength);
-      warnings.push(`Target truncated to ${LOGIC_LIMITS.maxTargetLength} chars`);
-    }
-
-    const context = input.context?.trim() ?? '';
-    const depth: LogicDepth = input.depth ?? 'standard';
-    const focus: LogicFocus[] = input.focus ?? [];
-    const stack: TechStack[] = input.stack ?? [];
-
-    // Build methodology
-    const methodology = this.buildMethodology(target, context, depth, focus, stack);
-
-    return {
-      status: 'success',
-      target,
-      depth,
-      focus,
-      stack: stack.length > 0 ? stack : undefined,
-      methodology,
-      warnings,
-    };
+/** Format the public think_logic response without building an intermediate result graph. */
+export function formatLogicMethodology(input: LogicAnalysisInput): [text: string, isError: boolean] {
+  if (!input.target || input.target.trim().length < LOGIC_LIMITS.minTargetLength) {
+    return [`🚫 ERROR: Target must be at least ${LOGIC_LIMITS.minTargetLength} characters`, true];
   }
 
-  private buildMethodology(
-    target: string,
-    context: string,
-    depth: LogicDepth,
-    focus: LogicFocus[],
-    stack: TechStack[]
-  ): LogicMethodology {
-    const sections: MethodologySection[] = [];
+  const target = input.target.trim().substring(0, LOGIC_LIMITS.maxTargetLength);
+  const context = input.context?.trim() ?? '';
+  const depth = input.depth ?? 'standard';
+  const focus = input.focus ?? [];
+  const stack = input.stack ?? [];
+  const lines = [
+    '# LOGIC ANALYSIS METHODOLOGY',
+    `**Depth:** ${depth} | **Focus:** ${focus.length > 0 ? focus.join(', ') : 'general'}`,
+  ];
 
-    // Phase 1: Chain Mapping (always included)
-    sections.push({
-      title: METHODOLOGY.chainMapping.title,
-      purpose: METHODOLOGY.chainMapping.purpose,
-      content: METHODOLOGY.chainMapping.method,
-    });
+  if (stack.length > 0) lines.push(`**Stack:** ${stack.join(', ')}`);
+  lines.push('', '## 📋 TASK', `Analyze: "${target}"${context ? ` (${context})` : ''}`, '', '---', '');
 
-    // Phase 2: Crack Hunting
-    const crackContent = [...METHODOLOGY.crackHunting.method];
-    
-    // Add focus-specific prompts
-    if (focus.length > 0 && depth !== 'quick') {
-      crackContent.push('', '---', '');
-      for (const f of focus) {
-        if (FOCUS_PROMPTS[f]) {
-          crackContent.push(...FOCUS_PROMPTS[f], '');
-        }
-      }
-    }
-    
-    sections.push({
-      title: METHODOLOGY.crackHunting.title,
-      purpose: METHODOLOGY.crackHunting.purpose,
-      content: crackContent,
-    });
+  appendSection(lines, METHODOLOGY.chainMapping);
 
-    // Phase 3: Standard Benchmark (standard and deep only)
-    if (depth !== 'quick') {
-      sections.push({
-        title: METHODOLOGY.standardBenchmark.title,
-        purpose: METHODOLOGY.standardBenchmark.purpose,
-        content: METHODOLOGY.standardBenchmark.method,
-      });
-    }
+  const crackContent = [...METHODOLOGY.crackHunting.method];
+  if (focus.length > 0 && depth !== 'quick') {
+    crackContent.push('', '---', '');
+    for (const item of focus) crackContent.push(...FOCUS_PROMPTS[item], '');
+  }
+  appendSection(lines, METHODOLOGY.crackHunting, crackContent);
 
-    // Phase 4: Action Planning (always included)
-    sections.push({
-      title: METHODOLOGY.actionPlanning.title,
-      purpose: METHODOLOGY.actionPlanning.purpose,
-      content: METHODOLOGY.actionPlanning.method,
-    });
+  if (depth !== 'quick') appendSection(lines, METHODOLOGY.standardBenchmark);
+  appendSection(lines, METHODOLOGY.actionPlanning);
 
-    // Stack reminders (if any)
-    let stackReminders: string[] | undefined;
-    if (stack.length > 0) {
-      stackReminders = [];
-      for (const s of stack) {
-        if (STACK_PROMPTS[s]) {
-          stackReminders.push(...STACK_PROMPTS[s]);
-        }
-      }
-    }
-
-    return {
-      task: `Analyze: "${target}"${context ? ` (${context})` : ''}`,
-      sections,
-      stackReminders,
-    };
+  if (depth === 'deep') {
+    lines.push(
+      '---',
+      '## DEEP EVIDENCE GATE',
+      '- For every finding, cite the exact source location and observed behavior.',
+      '- Try to disprove the finding with one counterexample or existing safeguard.',
+      '- Keep only findings that survive; label anything unverified as a hypothesis.'
+    );
   }
 
-  private errorResult(message: string): LogicAnalysisResult {
-    return {
-      status: 'error',
-      target: '',
-      depth: 'standard',
-      focus: [],
-      warnings: [],
-      errorMessage: message,
-    };
+  if (stack.length > 0) {
+    lines.push('---', '## 🛠️ STACK REMINDERS');
+    for (const item of stack) lines.push(...STACK_PROMPTS[item].map((reminder) => `- ${reminder}`));
   }
 
-  /**
-   * Format as markdown for AI consumption
-   */
-  formatAsMarkdown(result: LogicAnalysisResult): string {
-    if (result.status === 'error') {
-      return `🚫 ERROR: ${result.errorMessage}`;
-    }
-
-    if (!result.methodology) {
-      return '🚫 ERROR: No methodology generated';
-    }
-
-    const m = result.methodology;
-    const lines: string[] = [];
-
-    // Header
-    lines.push(`# LOGIC ANALYSIS METHODOLOGY`);
-    lines.push(`**Depth:** ${result.depth} | **Focus:** ${result.focus.length > 0 ? result.focus.join(', ') : 'general'}`);
-    if (result.stack?.length) {
-      lines.push(`**Stack:** ${result.stack.join(', ')}`);
-    }
-    lines.push('');
-    lines.push(`## 📋 TASK`);
-    lines.push(m.task);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-
-    // Sections
-    for (const section of m.sections) {
-      lines.push(`## ${section.title}`);
-      lines.push(`*${section.purpose}*`);
-      lines.push('');
-      for (const line of section.content) {
-        lines.push(line);
-      }
-      lines.push('');
-    }
-
-    // Stack reminders
-    if (m.stackReminders && m.stackReminders.length > 0) {
-      lines.push('---');
-      lines.push('## 🛠️ STACK REMINDERS');
-      for (const reminder of m.stackReminders) {
-        lines.push(`- ${reminder}`);
-      }
-    }
-
-    return lines.join('\n');
-  }
+  return [lines.join('\n'), false];
 }

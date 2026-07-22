@@ -25,6 +25,8 @@ export interface ThoughtMetadata {
   normalizedEntropy?: number;
   /** Processing time in milliseconds */
   processingTimeMs?: number;
+  /** Origin of the thought when aggregating across tool modes */
+  source?: 'think' | 'cycle';
 }
 
 export interface ThoughtExtension {
@@ -32,21 +34,6 @@ export interface ThoughtExtension {
   content: string;
   impact: ImpactLevel;
   timestamp: string;
-}
-
-export interface ExtendThoughtInput {
-  targetThoughtNumber: number;
-  extensionType: ExtensionType;
-  content: string;
-  impactOnFinalResult: ImpactLevel;
-}
-
-export interface ExtendThoughtResult {
-  status: 'success' | 'error';
-  targetThought?: string;
-  totalExtensionsOnThisThought?: number;
-  systemAdvice: string;
-  errorMessage?: string;
 }
 
 export interface ThoughtInput {
@@ -71,6 +58,10 @@ export interface ThoughtInput {
   quickExtension?: QuickExtension;
   /** Show ASCII tree in response (v3.2.0) - default false to save tokens */
   showTree?: boolean;
+  /** Runtime scope identifier for cross-tool session coordination */
+  scopeId?: string;
+  /** Internal identity of a cycle step mirrored into the think history */
+  mirroredCycleSessionId?: string;
 }
 
 export interface ThoughtRecord extends ThoughtInput {
@@ -82,30 +73,17 @@ export interface ThoughtRecord extends ThoughtInput {
   sessionId?: string;
 }
 
-export interface ThoughtSummary {
-  thoughtNumber: number;
-  thought: string;
-  confidence?: number;
-}
-
 export interface ValidationResult {
   valid: boolean;
   warning?: string;
 }
 
 export interface ThinkingResult {
-  [key: string]: unknown;
   thoughtNumber: number;
   totalThoughts: number;
   nextThoughtNeeded: boolean;
-  branches: string[];
-  thoughtHistoryLength: number;
-  /** Summary of last 3 thoughts for context retention */
-  contextSummary: ThoughtSummary[];
   /** ASCII tree visualization of thought structure */
   thoughtTree: string;
-  /** Mermaid.js graph visualization */
-  thoughtTreeMermaid?: string;
   /** Validation warning if sequence was broken */
   warning?: string;
   /** Average confidence across all thoughts */
@@ -120,14 +98,8 @@ export interface ThinkingResult {
   sessionGoal?: string;
   /** Proactive micro-prompt for self-reflection (v4.6.0) */
   nudge?: string;
-}
-
-/** Session data for persistence */
-export interface SessionData {
-  history: ThoughtRecord[];
-  branches: [string, ThoughtRecord[]][];
-  lastThoughtNumber: number;
-  savedAt: string;
+  /** Shared reasoning scope identifier */
+  scopeId?: string;
 }
 
 /** Verdict for consolidation */
@@ -144,9 +116,6 @@ export interface QuickExtension {
 export interface ConsolidateInput {
   winningPath: number[];
   summary: string;
-  // Made optional in v3.1.0 - reduces friction for simple consolidations
-  constraintCheck?: string;
-  potentialFlaws?: string;
   verdict: ConsolidateVerdict;
 }
 
@@ -178,19 +147,6 @@ export interface PathConnectivityResult {
 }
 
 
-/** Options for session export flow (v2.10.0) */
-export interface ExportSessionOptions {
-  format?: 'markdown' | 'json';
-  includeMermaid?: boolean;
-}
-
-/** Session data extended with goal (v2.10.0) */
-export interface SessionDataV2 extends SessionData {
-  goal?: string;
-  /** Current session ID for isolation (v2.11.0) */
-  currentSessionId?: string;
-}
-
 /** Dead end - a path that was rejected (v3.3.0) */
 export interface DeadEnd {
   /** The path that led to a dead end */
@@ -202,13 +158,6 @@ export interface DeadEnd {
   /** Session ID for isolation */
   sessionId?: string;
 }
-
-/** Session data with dead ends tracking (v3.3.0) */
-export interface SessionDataV3 extends SessionDataV2 {
-  /** Paths that were rejected and should be avoided */
-  deadEnds?: DeadEnd[];
-}
-
 
 // ============================================
 // v3.4.0 - Recall Edition
@@ -232,6 +181,8 @@ export interface RecallInput {
   limit?: number;
   /** Fuse.js threshold 0-1, lower = stricter match (default: 0.4) */
   threshold?: number;
+  /** Optional explicit reasoning scope */
+  scopeId?: string;
 }
 
 /** Single match from recall_thought */
@@ -252,6 +203,8 @@ export interface RecallMatch {
   extensionType?: ExtensionType;
   /** Session ID for context */
   sessionId?: string;
+  /** Which reasoning mode produced the match */
+  source?: 'think' | 'cycle';
 }
 
 /** Result from recall_thought tool */
@@ -308,11 +261,13 @@ export interface SubmitSessionInput {
   consolidation?: BurstConsolidation;
   /** Include ASCII tree in response (default: false) */
   showTree?: boolean;
+  /** Runtime scope identifier for cross-tool session coordination */
+  scopeId?: string;
 }
 
 /** Validation metrics for burst session */
 export interface BurstMetrics {
-  avgConfidence: number;
+  avgConfidence?: number;
   avgEntropy: number;
   avgLength: number;
   stagnationScore: number;
@@ -338,40 +293,38 @@ export interface SubmitSessionResult {
   errorMessage?: string;
   /** Proactive micro-prompt for self-reflection (v4.6.0) */
   nudge?: string;
+  /** Shared reasoning scope identifier */
+  scopeId?: string;
 }
 
-
-// ============================================
-// v4.1.0 - Insights Edition (Cross-Session Learning)
-// ============================================
-
-/** Input for recall_insights tool */
-export interface RecallInsightsInput {
-  /** Search query for finding relevant past solutions */
-  query: string;
-  /** Maximum results to return (default: 3) */
-  limit?: number;
+/** Persisted think state snapshot stored inside runtime scopes */
+export interface RuntimeThinkState {
+  history: ThoughtRecord[];
+  branches: [string, ThoughtRecord[]][];
+  lastThoughtNumber: number;
+  goal?: string;
+  currentSessionId?: string;
+  currentScopeId?: string;
+  deadEnds?: DeadEnd[];
 }
 
-/** Result from recall_insights tool */
-export interface RecallInsightsResult {
-  /** Matching insights from past sessions */
-  matches: {
-    /** Summary of the past solution */
-    summary: string;
-    /** Goal that was achieved */
-    goal?: string;
-    /** Keywords associated with this insight */
-    keywords: string[];
-    /** When this insight was recorded */
-    timestamp: string;
-    /** Relevance score (0-1, lower = better match) */
-    relevance: number;
-  }[];
-  /** Total insights in storage */
-  totalInsights: number;
-  /** Top recurring patterns */
-  topPatterns: { keyword: string; count: number }[];
+/** Shared runtime scope that coordinates think + cycle sessions */
+export interface RuntimeScopeRecord {
+  scopeId: string;
+  createdAt: number;
+  updatedAt: number;
+  goal?: string;
+  thinkSessionId?: string;
+  thinkState?: RuntimeThinkState;
+  cycleSessionIds: string[];
+}
+
+/** Persisted runtime coordination state */
+export interface RuntimeStateData {
+  schemaVersion: number;
+  activeScopeId?: string;
+  scopes: RuntimeScopeRecord[];
+  savedAt: string;
 }
 
 
@@ -384,12 +337,6 @@ export type LogicDepth = 'quick' | 'standard' | 'deep';
 
 /** Focus areas for think_logic */
 export type LogicFocus = 'security' | 'performance' | 'reliability' | 'ux' | 'architecture' | 'data-flow';
-
-/** Severity levels for identified cracks */
-export type CrackSeverity = 'blocker' | 'high' | 'medium' | 'low';
-
-/** Priority levels for action items */
-export type ActionPriority = 'P0' | 'P1' | 'P2' | 'P3';
 
 /** Supported tech stacks for stack-aware analysis */
 export type TechStack = 
@@ -414,120 +361,6 @@ export interface LogicAnalysisInput {
   focus?: LogicFocus[];
   /** Tech stacks to apply stack-specific checks (v4.8.0) */
   stack?: TechStack[];
-  /** Show chain map section */
-  showChain?: boolean;
-  /** Show cracks section */
-  showCracks?: boolean;
-  /** Show luxury standard section */
-  showStandard?: boolean;
-  /** Show action items section */
-  showActions?: boolean;
-}
-
-/** Single step in the logic chain */
-export interface LogicChainStep {
-  /** Step number in sequence */
-  step: number;
-  /** Step name/title */
-  name: string;
-  /** What happens at this step */
-  description: string;
-  /** Components/systems involved */
-  components?: string[];
-  /** Data transformations */
-  dataFlow?: string;
-}
-
-/** Identified crack/weakness in the logic */
-export interface LogicCrack {
-  /** Unique identifier */
-  id: string;
-  /** Severity level */
-  severity: CrackSeverity;
-  /** Which chain step this affects */
-  affectsStep?: number;
-  /** Category of the crack */
-  category: string;
-  /** Description of the issue */
-  description: string;
-  /** Potential impact if not addressed */
-  impact: string;
-  /** Related focus area */
-  focus?: LogicFocus;
-  /** Possible root causes (v4.8.0 - WHY analysis) */
-  possibleCauses?: string[];
-  /** Debug steps to investigate (v4.8.0) */
-  debugSteps?: string[];
-  /** Stack-specific if detected from tech stack */
-  fromStack?: string;
-}
-
-/** Luxury standard benchmark item */
-export interface LogicStandard {
-  /** Standard category */
-  category: string;
-  /** What the standard requires */
-  requirement: string;
-  /** Current state assessment */
-  currentState: 'met' | 'partial' | 'missing' | 'unknown';
-  /** Gap description if not fully met */
-  gap?: string;
-}
-
-/** Action item for improvement */
-export interface LogicActionItem {
-  /** Unique identifier */
-  id: string;
-  /** Priority level */
-  priority: ActionPriority;
-  /** Action title */
-  title: string;
-  /** Detailed description */
-  description: string;
-  /** Which crack this addresses */
-  addressesCrack?: string;
-  /** Estimated effort */
-  effort?: 'trivial' | 'small' | 'medium' | 'large';
-}
-
-/** Result from think_logic tool - v5.0.0 Methodology Edition */
-export interface LogicAnalysisResult {
-  /** Analysis status */
-  status: 'success' | 'error';
-  /** Target that was analyzed */
-  target: string;
-  /** Depth used */
-  depth: LogicDepth;
-  /** Focus areas applied */
-  focus: LogicFocus[];
-  /** Tech stacks applied */
-  stack?: TechStack[];
-  /** Generated methodology for AI to follow */
-  methodology?: LogicMethodology;
-  /** Warnings during analysis */
-  warnings: string[];
-  /** Error message if status is error */
-  errorMessage?: string;
-}
-
-/** Single section in the methodology */
-export interface MethodologySection {
-  /** Section title with emoji */
-  title: string;
-  /** Purpose of this phase */
-  purpose: string;
-  /** Instructions/questions for AI to follow */
-  content: string[];
-}
-
-/** Methodology structure - instructions for AI, not analysis results */
-export interface LogicMethodology {
-  /** Task description */
-  task: string;
-  /** Methodology sections (phases) */
-  sections: MethodologySection[];
-  /** Stack-specific reminders (optional) */
-  stackReminders?: string[];
 }
 
 // ============================================
@@ -564,8 +397,10 @@ export type CycleReasonCode =
   | 'LOW_CONFIDENCE_STABILITY'
   | 'TOO_MANY_SHORT_THOUGHTS'
   | 'CONTRADICTION_SIGNAL'
+  | 'CONSTRAINT_CHECK_REQUIRED'
   | 'MAX_LOOPS_REACHED'
   | 'INTEROP_BACKEND_ERROR'
+  | 'SESSION_COMPLETED'
   | 'SESSION_NOT_FOUND'
   | 'INVALID_ACTION'
   | 'INVALID_INPUT';
@@ -577,7 +412,7 @@ export interface CycleQuality {
   critique: number;
   verification: number;
   diversity: number;
-  confidenceStability: number;
+  confidenceStability?: number;
 }
 
 /** Loop counters reported by think_cycle */
@@ -622,11 +457,15 @@ export interface CycleThoughtRecord {
 /** Session model for think_cycle */
 export interface CycleSession {
   sessionId: string;
+  scopeId?: string;
   goal: string;
   context?: string;
   constraints: string[];
   createdAt: number;
   updatedAt: number;
+  completedAt?: number;
+  finalApprovedAnswer?: string;
+  insightPending?: boolean;
   maxLoops: number;
   requiredThoughts: number;
   backendMode: CycleBackendMode;
@@ -639,6 +478,7 @@ export interface CycleSession {
 export interface ThinkCycleInput {
   action: CycleAction;
   sessionId?: string;
+  scopeId?: string;
   goal?: string;
   context?: string;
   constraints?: string[];
@@ -646,23 +486,28 @@ export interface ThinkCycleInput {
   thoughtType?: CycleThoughtType;
   confidence?: number;
   finalAnswer?: string;
+  constraintCheck?: string;
   backendMode?: CycleBackendMode;
   maxLoops?: number;
   showTrace?: boolean;
+  exportReport?: 'markdown' | 'json';
+  includeMermaid?: boolean;
 }
 
 /** Output for think_cycle tool */
 export interface ThinkCycleResult {
   status: 'in_progress' | 'blocked' | 'ready' | 'completed' | 'error';
   sessionId: string;
+  scopeId?: string;
   loop: CycleLoopState;
   quality: CycleQuality;
   kpi: CycleKpi;
   gate: CycleGate;
   requiredMoreThoughts: number;
   nextPrompts: string[];
-  shortTrace: string[];
+  shortTrace?: string[];
   finalApprovedAnswer?: string;
+  exportedReport?: string;
   interopFallback?: boolean;
   errorMessage?: string;
 }

@@ -27,7 +27,7 @@ export class ConsolidateService {
     onDeadEnd?: (path: number[], reason: string) => void,
     onSuccess?: (path: number[], summary: string) => void
   ): ConsolidateResult {
-    const { winningPath, verdict } = input;
+    const { winningPath, summary, verdict } = input;
     const warnings: string[] = [];
 
     if (sessionThoughts.length === 0) {
@@ -46,6 +46,15 @@ export class ConsolidateService {
         },
         errorMessage: 'No thoughts recorded. Use think first.',
       };
+    }
+
+    const sessionIncomplete = sessionThoughts[sessionThoughts.length - 1].nextThoughtNeeded === true;
+    if (sessionIncomplete) {
+      warnings.push('ERROR SESSION INCOMPLETE: Last thought explicitly requires more work.');
+    }
+    const summaryMissing = summary.trim().length === 0;
+    if (summaryMissing) {
+      warnings.push('ERROR SUMMARY REQUIRED: Provide a non-empty final logic summary.');
     }
 
     const existingNumbers = new Set(sessionThoughts.map((t) => t.thoughtNumber));
@@ -172,6 +181,8 @@ export class ConsolidateService {
       !hasCriticalWarnings &&
       !hasMissingRevisions &&
       !hasPathDiscontinuity &&
+      !sessionIncomplete &&
+      !summaryMissing &&
       warnings.length <= 1;
 
     let evaluation: string;

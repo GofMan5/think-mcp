@@ -38,6 +38,8 @@ const STOP_WORDS = new Set([
 export interface WinningPathRecord {
   /** Thought numbers in the winning path */
   path: number[];
+  /** Internal dedupe fingerprint */
+  fingerprint: string;
   /** Summary of the solution */
   summary: string;
   /** Session goal that was achieved */
@@ -50,6 +52,12 @@ export interface WinningPathRecord {
   avgConfidence?: number;
   /** Number of thoughts in the session */
   sessionLength: number;
+  /** Origin tool that produced the saved insight */
+  source?: 'think' | 'cycle';
+  /** Source session identifier */
+  sessionId?: string;
+  /** Shared reasoning scope identifier */
+  scopeId?: string;
 }
 
 /** Insights storage structure */
@@ -73,6 +81,9 @@ export interface SaveInsightInput {
   goal?: string;
   avgConfidence?: number;
   sessionLength: number;
+  source?: 'think' | 'cycle';
+  sessionId?: string;
+  scopeId?: string;
 }
 
 /** Single match from insights search */
@@ -94,6 +105,22 @@ export class InsightsService {
   private data: InsightsData | null = null;
   private fuseIndex: Fuse<WinningPathRecord> | null = null;
   private isDirty = false;
+
+  private normalizeTextForFingerprint(text: string | undefined): string {
+    return String(text ?? '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private buildFingerprint(input: Pick<SaveInsightInput, 'path' | 'summary' | 'goal'>): string {
+    return [
+      this.normalizeTextForFingerprint(input.summary),
+      this.normalizeTextForFingerprint(input.goal),
+      input.path.join('-'),
+    ].join('|');
+  }
 
   /**
    * Extract keywords from text for pattern tracking
@@ -150,12 +177,25 @@ export class InsightsService {
 
     return {
       path,
+      fingerprint:
+        typeof candidate.fingerprint === 'string' && candidate.fingerprint.trim().length > 0
+          ? candidate.fingerprint
+          : this.buildFingerprint({ path, summary: candidate.summary.trim(), goal }),
       summary: candidate.summary.trim(),
       goal,
       keywords,
       timestamp,
       avgConfidence,
       sessionLength,
+      source: candidate.source === 'cycle' ? 'cycle' : candidate.source === 'think' ? 'think' : undefined,
+      sessionId:
+        typeof candidate.sessionId === 'string' && candidate.sessionId.trim().length > 0
+          ? candidate.sessionId
+          : undefined,
+      scopeId:
+        typeof candidate.scopeId === 'string' && candidate.scopeId.trim().length > 0
+          ? candidate.scopeId
+          : undefined,
     };
   }
 
@@ -313,7 +353,8 @@ export class InsightsService {
   async saveWinningPath(input: SaveInsightInput): Promise<void> {
     if (!this.data) await this.load();
 
-    const { path, summary, goal, avgConfidence, sessionLength } = input;
+    const { path, summary, goal, avgConfidence, sessionLength, source, sessionId, scopeId } = input;
+    const fingerprint = this.buildFingerprint({ path, summary, goal });
 
     // Extract keywords from summary and goal
     const keywords = [
@@ -324,13 +365,25 @@ export class InsightsService {
     // Create record
     const record: WinningPathRecord = {
       path,
+      fingerprint,
       summary,
       goal,
       keywords: [...new Set(keywords)], // Dedupe
       timestamp: new Date().toISOString(),
       avgConfidence,
       sessionLength,
+      source,
+      sessionId,
+      scopeId,
     };
+
+    const existingIndex = this.data!.winningPaths.findIndex((item) => item.fingerprint === fingerprint);
+    if (existingIndex >= 0) {
+      const replaced = this.data!.winningPaths.splice(existingIndex, 1)[0];
+      this.decrementPatternCounts(replaced.keywords);
+    } else {
+      this.data!.totalSessions++;
+    }
 
     // Add to winningPaths (FIFO)
     this.data!.winningPaths.push(record);
@@ -343,15 +396,13 @@ export class InsightsService {
 
     // Update pattern counts
     this.incrementPatternCounts(record.keywords);
-
-    this.data!.totalSessions++;
     this.isDirty = true;
 
     // Rebuild index and save
     this.rebuildIndex();
     await this.save();
 
-    console.error(`Saved insight: "${summary.substring(0, 50)}..." (${record.keywords.length} keywords)`);
+    console.error(`${existingIndex >= 0 ? 'Updated' : 'Saved'} insight: "${summary.substring(0, 50)}..." (${record.keywords.length} keywords)`);
   }
 
   /**

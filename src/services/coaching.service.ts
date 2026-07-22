@@ -344,7 +344,7 @@ export class CoachingService {
 
     if (auditWarnings.length > 0) {
       auditWarnings.unshift('PRE-CONSOLIDATION AUDIT:');
-      auditWarnings.push('Address items or call think_done.');
+      auditWarnings.push('Address items before think_done.');
     }
 
     return auditWarnings.length > 0 ? auditWarnings.join('\n') : undefined;

@@ -25,31 +25,26 @@ import { dirname, join } from 'path';
 import type {
   ThoughtInput,
   ThoughtRecord,
-  ThoughtSummary,
   ThinkingResult,
-  ExtendThoughtInput,
-  ExtendThoughtResult,
   ThoughtExtension,
   QuickExtension,
   DeadEnd,
   RecallInput,
   RecallResult,
-  RecallScope,
-  ValidationResult,
+  RuntimeThinkState,
   PathConnectivityResult,
   // v4.0.0 - Burst Thinking
   SubmitSessionInput,
   SubmitSessionResult,
 } from '../types/thought.types.js';
+import type { SaveInsightInput } from './insights.service.js';
 import {
-  ensureThinkMcpDataDir,
   getThinkMcpDataFile,
   migrateLegacyFile,
 } from '../utils/storage-paths.js';
 
 // Import constants from dedicated modules
 import {
-  RETAIN_FULL_THOUGHTS,
   MAX_DEAD_ENDS,
   SESSION_TTL_HOURS,
   SESSION_FILE_NAME,
@@ -86,6 +81,7 @@ import { InsightsService } from './insights.service.js';
 
 // Import nudge service (v4.6.0)
 import { NudgeService } from './nudge.service.js';
+import { RuntimeStateService } from './runtime-state.service.js';
 
 // Session file path (relative to module directory)
 const __filename = fileURLToPath(import.meta.url);
@@ -101,9 +97,8 @@ export class ThinkingService {
   private sessionGoal: string | undefined;
   /** Current session ID for isolation (v2.11.0) */
   private currentSessionId: string = '';
-
-  /** Promise-based lock for FS operations to prevent race conditions */
-  private fsLock: Promise<void> = Promise.resolve();
+  /** Shared runtime scope ID for cross-tool coordination */
+  private currentScopeId: string = '';
 
   /** Dead ends - paths that were rejected (v3.3.0) */
   private deadEnds: DeadEnd[] = [];
@@ -138,6 +133,8 @@ export class ThinkingService {
   /** Nudge service for proactive micro-prompts (v4.6.0) */
   private nudgeService = new NudgeService();
 
+  constructor(private readonly runtimeState?: RuntimeStateService) {}
+
   /**
    * Get the start index of current session (after last thought #1)
    * @deprecated Use getCurrentSessionThoughts() with sessionId filtering instead (v2.11.0)
@@ -166,23 +163,128 @@ export class ThinkingService {
     return this.thoughtHistory.slice(startIdx);
   }
 
-  /**
-   * Execute FS operation with mutex lock to prevent race conditions
-   * Chains operations sequentially - critical for data integrity
-   */
-  private async withFsLock<T>(operation: () => Promise<T>): Promise<T> {
-    const currentLock = this.fsLock;
-    let releaseLock: () => void;
-    this.fsLock = new Promise((resolve) => {
-      releaseLock = resolve;
-    });
+  getRuntimeBootstrapState(): RuntimeThinkState | undefined {
+    if (this.thoughtHistory.length === 0) return undefined;
+    return {
+      history: JSON.parse(JSON.stringify(this.thoughtHistory)) as ThoughtRecord[],
+      branches: JSON.parse(JSON.stringify(Array.from(this.branches.entries()))) as [string, ThoughtRecord[]][],
+      lastThoughtNumber: this.lastThoughtNumber,
+      goal: this.sessionGoal,
+      currentSessionId: this.currentSessionId || undefined,
+      currentScopeId: this.currentScopeId || undefined,
+      deadEnds: JSON.parse(JSON.stringify(this.deadEnds)) as DeadEnd[],
+    };
+  }
 
-    try {
-      await currentLock; // Wait for previous operation to complete
-      return await operation();
-    } finally {
-      releaseLock!(); // Release lock for next operation
+  private getRuntimeStateView(): RuntimeThinkState | undefined {
+    if (this.thoughtHistory.length === 0) return undefined;
+    return {
+      history: this.thoughtHistory,
+      branches: Array.from(this.branches.entries()),
+      lastThoughtNumber: this.lastThoughtNumber,
+      goal: this.sessionGoal,
+      currentSessionId: this.currentSessionId || undefined,
+      currentScopeId: this.currentScopeId || undefined,
+      deadEnds: this.deadEnds,
+    };
+  }
+
+  restoreRuntimeScope(scopeId: string | undefined, thinkState?: RuntimeThinkState): void {
+    this.reset();
+    this.currentScopeId = scopeId ?? thinkState?.currentScopeId ?? '';
+    if (!thinkState) {
+      this.invalidateFuseIndex();
+      return;
     }
+
+    this.thoughtHistory = JSON.parse(JSON.stringify(thinkState.history ?? [])) as ThoughtRecord[];
+    this.branches = new Map(JSON.parse(JSON.stringify(thinkState.branches ?? [])) as [string, ThoughtRecord[]][]);
+    this.lastThoughtNumber = thinkState.lastThoughtNumber ?? 0;
+    this.sessionGoal = thinkState.goal;
+    this.currentSessionId = thinkState.currentSessionId ?? '';
+    this.deadEnds = JSON.parse(JSON.stringify(thinkState.deadEnds ?? [])) as DeadEnd[];
+    this.invalidateFuseIndex();
+  }
+
+  getThoughtsForScope(scopeId?: string): ThoughtRecord[] {
+    if (!scopeId) {
+      return [...this.getCurrentSessionThoughts()];
+    }
+
+    if (scopeId === this.currentScopeId && this.thoughtHistory.length > 0) {
+      return [...this.getCurrentSessionThoughts()];
+    }
+
+    const runtimeThinkState = this.runtimeState?.getThinkState(scopeId);
+    return runtimeThinkState?.history ? [...runtimeThinkState.history] : [];
+  }
+
+  private syncRuntimeScope(): void {
+    if (!this.runtimeState || !this.currentScopeId) return;
+    const snapshot = this.getRuntimeStateView();
+    if (!snapshot) return;
+    this.runtimeState.upsertThinkState(this.currentScopeId, snapshot);
+  }
+
+  private resolveScopeForNewThinkSession(scopeId: string | undefined, goal?: string): string | undefined {
+    if (!this.runtimeState) {
+      return scopeId;
+    }
+
+    if (scopeId) {
+      if (!this.runtimeState.hasScope(scopeId)) {
+        return undefined;
+      }
+      this.runtimeState.activateScope(scopeId);
+      return scopeId;
+    }
+
+    return this.runtimeState.createScope(goal);
+  }
+
+  private thoughtError(input: ThoughtInput, message: string | undefined, showTree = false): ThinkingResult {
+    return {
+      thoughtNumber: input.thoughtNumber,
+      totalThoughts: input.totalThoughts,
+      nextThoughtNeeded: true,
+      thoughtTree: showTree ? this.generateAsciiTree() : '',
+      isError: true,
+      errorMessage: message,
+      warning: message,
+      scopeId: this.currentScopeId || undefined,
+    };
+  }
+
+  /** Append a mirrored cycle thought to its scope without replacing an existing think snapshot. */
+  processThoughtInScope(input: ThoughtInput, scopeId: string): ThinkingResult {
+    const targetState = this.runtimeState?.getThinkState(scopeId);
+    if (!targetState?.history.length) {
+      return this.processThought({ ...input, scopeId: input.thoughtNumber === 1 ? scopeId : undefined });
+    }
+
+    if (this.currentScopeId !== scopeId) {
+      this.restoreRuntimeScope(scopeId, targetState);
+    }
+    const lastMainlineThought = this.getCurrentSessionThoughts().reduce(
+      (last, thought) => thought.isRevision || thought.branchFromThought
+        ? last
+        : Math.max(last, thought.thoughtNumber),
+      this.lastThoughtNumber
+    );
+    const thoughtNumber = input.isRevision && lastMainlineThought > 0
+      ? lastMainlineThought
+      : lastMainlineThought + 1;
+
+    return this.processThought({
+      ...input,
+      thoughtNumber,
+      totalThoughts: Math.max(input.totalThoughts, thoughtNumber),
+      goal: undefined,
+      scopeId: undefined,
+      revisesThought: input.isRevision
+        ? input.revisesThought ?? lastMainlineThought
+        : input.revisesThought,
+    });
   }
 
   /**
@@ -190,100 +292,66 @@ export class ThinkingService {
    * Implements Strict Logic Mode with hard duplicate rejection
    */
   processThought(input: ThoughtInput): ThinkingResult {
-    // Smart auto-reset: if thoughtNumber=1 and history not empty, start fresh session
-    // SYNCHRONOUS reset to avoid race conditions
-    if (input.thoughtNumber === 1 && this.thoughtHistory.length > 0 && !input.isRevision) {
-      console.error('🔄 New session detected (thought #1), clearing previous state...');
-      this.reset(); // Synchronous clear
-      // Clear persistence file asynchronously (non-blocking)
-      this.clearSession().catch((err) => console.error('Failed to clear session:', err));
-    }
-
-    // Generate new sessionId for first thought of session (v2.11.0)
-    if (input.thoughtNumber === 1 && !input.isRevision) {
-      this.currentSessionId = new Date().toISOString();
-      console.error(`🆔 New session ID: ${this.currentSessionId}`);
+    if (input.scopeId && input.thoughtNumber !== 1) {
+      return this.thoughtError(input, '[ERR_SCOPE_INPUT] scopeId is accepted only on thoughtNumber=1.');
     }
 
     // Auto-adjust totalThoughts if exceeded
     if (input.thoughtNumber > input.totalThoughts) {
-      input.totalThoughts = input.thoughtNumber;
+      input = { ...input, totalThoughts: input.thoughtNumber };
     }
     const shouldShowTree = input.showTree === true;
+    const isNewSession = input.thoughtNumber === 1 && !input.isRevision;
 
     // EMPTY THOUGHT VALIDATION - reject meaningless input
     if (!input.thought || !input.thought.trim()) {
-      return {
-        thoughtNumber: input.thoughtNumber,
-        totalThoughts: input.totalThoughts,
-        nextThoughtNeeded: true,
-        branches: Array.from(this.branches.keys()),
-        thoughtHistoryLength: this.thoughtHistory.length,
-        contextSummary: this.generateContextSummary(),
-        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
-        isError: true,
-        errorMessage: '[ERR_EMPTY_THOUGHT] Empty thought. Provide meaningful content.',
-        warning: '[ERR_EMPTY_THOUGHT] Empty thought. Provide meaningful content.',
-      };
+      return this.thoughtError(input, '[ERR_EMPTY_THOUGHT] Empty thought. Provide meaningful content.', shouldShowTree);
+    }
+
+    if (input.scopeId && this.runtimeState && !this.runtimeState.hasScope(input.scopeId)) {
+      return this.thoughtError(input, `[ERR_SCOPE_NOT_FOUND] Unknown scopeId: ${input.scopeId}`, shouldShowTree);
+    }
+
+    const sessionThoughts = isNewSession ? [] : this.getCurrentSessionThoughts();
+    const lastThoughtNumber = isNewSession ? 0 : this.lastThoughtNumber;
+
+    // HARD DUPLICATE REJECTION - reject before adding to history
+    const duplicateError = this.validationService.checkDuplicateStrict(input, sessionThoughts);
+    if (duplicateError) {
+      return this.thoughtError(input, duplicateError, shouldShowTree);
+    }
+
+    // BRANCH VALIDATION - reject if branchFromThought references non-existent thought
+    const branchError = this.validationService.validateBranchSource(input, sessionThoughts);
+    if (branchError) {
+      return this.thoughtError(input, branchError, shouldShowTree);
+    }
+
+    // Validate sequence (includes shallow/circular revision check)
+    const validation = this.validationService.validateSequence(input, sessionThoughts, lastThoughtNumber);
+    
+    // HARD REJECTION for invalid sequence/revision validation failures
+    if (!validation.valid) {
+      return this.thoughtError(input, validation.warning, shouldShowTree);
+    }
+
+    // Commit a new session only after every rejecting validation has passed.
+    if (isNewSession) {
+      if (this.thoughtHistory.length > 0) {
+        console.error('🔄 New session detected (thought #1), clearing previous state...');
+        this.reset();
+      }
+      this.currentScopeId = this.resolveScopeForNewThinkSession(input.scopeId, input.goal) ?? '';
+      this.currentSessionId = new Date().toISOString();
+      console.error(`🆔 New session ID: ${this.currentSessionId}`);
+    } else if (!this.currentScopeId) {
+      this.currentScopeId = this.runtimeState?.getActiveScopeId() ?? '';
     }
 
     // SESSION GOAL (v2.10.0) - Save goal from first thought
     if (input.goal && input.thoughtNumber === 1) {
       this.sessionGoal = input.goal;
       console.error(`🎯 Session goal set: ${input.goal.substring(0, 50)}...`);
-    }
-
-    // HARD DUPLICATE REJECTION - reject before adding to history
-    const duplicateError = this.checkDuplicateStrict(input);
-    if (duplicateError) {
-      return {
-        thoughtNumber: input.thoughtNumber,
-        totalThoughts: input.totalThoughts,
-        nextThoughtNeeded: true,
-        branches: Array.from(this.branches.keys()),
-        thoughtHistoryLength: this.thoughtHistory.length,
-        contextSummary: this.generateContextSummary(),
-        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
-        isError: true,
-        errorMessage: duplicateError,
-        warning: duplicateError,
-      };
-    }
-
-    // BRANCH VALIDATION - reject if branchFromThought references non-existent thought
-    const branchError = this.validateBranchSource(input);
-    if (branchError) {
-      return {
-        thoughtNumber: input.thoughtNumber,
-        totalThoughts: input.totalThoughts,
-        nextThoughtNeeded: true,
-        branches: Array.from(this.branches.keys()),
-        thoughtHistoryLength: this.thoughtHistory.length,
-        contextSummary: this.generateContextSummary(),
-        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
-        isError: true,
-        errorMessage: branchError,
-        warning: branchError,
-      };
-    }
-
-    // Validate sequence (includes shallow/circular revision check)
-    const validation = this.validateSequence(input);
-    
-    // HARD REJECTION for invalid sequence/revision validation failures
-    if (!validation.valid) {
-      return {
-        thoughtNumber: input.thoughtNumber,
-        totalThoughts: input.totalThoughts,
-        nextThoughtNeeded: true,
-        branches: Array.from(this.branches.keys()),
-        thoughtHistoryLength: this.thoughtHistory.length,
-        contextSummary: this.generateContextSummary(),
-        thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
-        isError: true,
-        errorMessage: validation.warning,
-        warning: validation.warning,
-      };
     }
 
     // Check for stagnation before adding new thought
@@ -294,6 +362,7 @@ export class ThinkingService {
       ...input,
       timestamp: Date.now(),
       sessionId: this.currentSessionId,
+      metadata: { source: 'think' },
     };
 
     this.thoughtHistory.push(record);
@@ -323,9 +392,6 @@ export class ThinkingService {
       `${prefix} ${input.thoughtNumber}/${input.totalThoughts}${confidenceStr}: ${input.thought.substring(0, 80)}...`
     );
 
-    // Save session asynchronously (fire and forget)
-    this.saveSession().catch((err) => console.error('Failed to save session:', err));
-
     // Combine warnings
     const warning = [validation.warning, stagnationWarning].filter(Boolean).join('\n');
 
@@ -333,6 +399,8 @@ export class ThinkingService {
     if (input.quickExtension) {
       this.processQuickExtension(input.thoughtNumber, input.quickExtension);
     }
+
+    this.syncRuntimeScope();
 
     // LATERAL THINKING TRIGGER - check for overly linear thinking
     // v5.0.1: Pass isFinishing flag to show subSteps check only at end
@@ -366,46 +434,14 @@ export class ThinkingService {
       thoughtNumber: input.thoughtNumber,
       totalThoughts: input.totalThoughts,
       nextThoughtNeeded: input.nextThoughtNeeded,
-      branches: Array.from(this.branches.keys()),
-      thoughtHistoryLength: this.thoughtHistory.length,
-      contextSummary: this.generateContextSummary(),
       thoughtTree: shouldShowTree ? this.generateAsciiTree() : '',
-      // v4.2.0: Lazy Mermaid - removed from hot path, use export report flow for diagrams
-      thoughtTreeMermaid: undefined,
       warning: warning || undefined,
       averageConfidence: this.calculateAverageConfidence(),
       systemAdvice,
       sessionGoal: this.sessionGoal,
       nudge,
+      scopeId: this.currentScopeId || undefined,
     };
-  }
-
-  /**
-   * Validate thought sequence - prevent skipping steps and invalid revisions
-   * Delegates to ValidationService
-   */
-  private validateSequence(input: ThoughtInput): ValidationResult {
-    return this.validationService.validateSequence(
-      input,
-      this.getCurrentSessionThoughts(),
-      this.lastThoughtNumber
-    );
-  }
-
-  /**
-   * HARD duplicate check - returns error message if duplicate found
-   * Delegates to ValidationService
-   */
-  private checkDuplicateStrict(input: ThoughtInput): string | undefined {
-    return this.validationService.checkDuplicateStrict(input, this.getCurrentSessionThoughts());
-  }
-
-  /**
-   * Validate branch source - reject if branchFromThought references non-existent thought
-   * Delegates to ValidationService
-   */
-  private validateBranchSource(input: ThoughtInput): string | undefined {
-    return this.validationService.validateBranchSource(input, this.getCurrentSessionThoughts());
   }
 
   /**
@@ -508,8 +544,7 @@ export class ThinkingService {
     this.deadEnds.push(deadEnd);
     console.error(`💀 Recorded dead end: path=[${pathKey}], reason="${reason.substring(0, 50)}..." (${this.deadEnds.length}/${MAX_DEAD_ENDS})`);
 
-    // Save session to persist dead end
-    this.saveSession().catch(err => console.error('Failed to save dead end:', err));
+    this.syncRuntimeScope();
   }
 
   /**
@@ -559,19 +594,6 @@ export class ThinkingService {
    */
   private performPreConsolidationAudit(): string | undefined {
     return this.coachingService.performPreConsolidationAudit(this.getCurrentSessionThoughts());
-  }
-
-  /**
-   * Generate summary of last 3 thoughts for context retention (current session only)
-   */
-  private generateContextSummary(): ThoughtSummary[] {
-    const sessionThoughts = this.getCurrentSessionThoughts();
-    const lastThoughts = sessionThoughts.slice(-3);
-    return lastThoughts.map((t) => ({
-      thoughtNumber: t.thoughtNumber,
-      thought: t.thought.length > 150 ? t.thought.substring(0, 150) + '...' : t.thought,
-      confidence: t.confidence,
-    }));
   }
 
   /**
@@ -670,203 +692,17 @@ export class ThinkingService {
   }
 
   /**
-   * Extend a thought with deep-dive analysis (vertical thinking)
-   * Attaches critique, elaboration, correction, or alternative to existing thought
-   * Uses findLastIndex to target the most recent thought with that number (current session)
-   */
-  extendThought(input: ExtendThoughtInput): ExtendThoughtResult {
-    const { targetThoughtNumber, extensionType, content, impactOnFinalResult } = input;
-
-    // Find target thought from the END (most recent first - current session priority)
-    let targetIndex = -1;
-    for (let i = this.thoughtHistory.length - 1; i >= 0; i--) {
-      if (this.thoughtHistory[i].thoughtNumber === targetThoughtNumber) {
-        targetIndex = i;
-        break;
-      }
-    }
-
-    if (targetIndex === -1) {
-      return {
-        status: 'error',
-        systemAdvice: `Thought #${targetThoughtNumber} not found.`,
-        errorMessage: `Thought #${targetThoughtNumber} not found in history.`,
-      };
-    }
-
-    // Validate target is in current session
-    const sessionStartIdx = this.getCurrentSessionStartIndex();
-    if (targetIndex < sessionStartIdx) {
-      return {
-        status: 'error',
-        systemAdvice: `Thought #${targetThoughtNumber} is from a previous session.`,
-        errorMessage: `Thought #${targetThoughtNumber} exists but belongs to a previous session. Only current session thoughts can be extended.`,
-      };
-    }
-
-    // Initialize extensions array if needed
-    if (!this.thoughtHistory[targetIndex].extensions) {
-      this.thoughtHistory[targetIndex].extensions = [];
-    }
-
-    // Create extension record
-    const extension: ThoughtExtension = {
-      type: extensionType,
-      content,
-      impact: impactOnFinalResult,
-      timestamp: new Date().toISOString(),
-    };
-
-    this.thoughtHistory[targetIndex].extensions!.push(extension);
-
-    // Log to stderr
-    console.error(
-      `🔍 Deep Dive on #${targetThoughtNumber} [${extensionType.toUpperCase()}]: ${content.substring(0, 50)}...`
-    );
-
-    // Generate system advice based on extension type and impact
-    let systemAdvice = 'Extension recorded.';
-    
-    // Strategic Lens specific advice (v2.9.0)
-    switch (extensionType) {
-      case 'innovation':
-        systemAdvice = '💡 INNOVATION recorded. Ensure you proposed 2-3 concrete directions. Consider which aligns best with project goals.';
-        break;
-      case 'optimization':
-        systemAdvice = '⚡ OPTIMIZATION recorded. Did you include "Before vs After" metrics? Quantify the improvement.';
-        break;
-      case 'polish':
-        systemAdvice = '✨ POLISH recorded. Create a checklist of specific items to fix. Track completion in next thoughts.';
-        break;
-      default:
-        // Original logic for other types
-        if (impactOnFinalResult === 'blocker' || impactOnFinalResult === 'high') {
-          systemAdvice =
-            "WARNING: This extension identified a critical issue. You should probably use 'think' with isRevision: true next.";
-        }
-    }
-
-    return {
-      status: 'success',
-      targetThought: this.thoughtHistory[targetIndex].thought.substring(0, 100) + '...',
-      totalExtensionsOnThisThought: this.thoughtHistory[targetIndex].extensions!.length,
-      systemAdvice,
-    };
-  }
-
-  /**
-   * Format full history with extensions for AI context
-   */
-  formatHistoryForAI(): string {
-    return this.thoughtHistory
-      .map((t) => {
-        let output = `${t.thoughtNumber}. ${t.thought}`;
-
-        // Add extensions with indentation
-        if (t.extensions && t.extensions.length > 0) {
-          const extText = t.extensions
-            .map(
-              (e) =>
-                `   └── [${e.type.toUpperCase()} - Impact: ${e.impact}]: ${e.content}`
-            )
-            .join('\n');
-          output += `\n${extText}`;
-        }
-
-        return output;
-      })
-      .join('\n');
-  }
-
-  /**
-   * Format history with smart pruning for long sessions
-   * Condenses old thoughts while keeping recent ones in full detail
-   */
-  formatCondensedHistory(): string {
-    if (this.thoughtHistory.length <= RETAIN_FULL_THOUGHTS + 2) {
-      return this.formatHistoryForAI(); // Return full history if short
-    }
-
-    const oldThoughts = this.thoughtHistory.slice(0, -RETAIN_FULL_THOUGHTS);
-    const recentThoughts = this.thoughtHistory.slice(-RETAIN_FULL_THOUGHTS);
-
-    // Generate condensed block for archived thoughts
-    const condensedBlock = [
-      `📚 ARCHIVED THOUGHTS (1-${oldThoughts.length}):`,
-      `[Summary]: Completed ${oldThoughts.length} initial analysis steps.`,
-      'Key outcomes:',
-      ...oldThoughts.map((t) => {
-        const confStr = t.confidence ? ` [conf:${t.confidence}]` : '';
-        return `- Step ${t.thoughtNumber}${confStr}: ${t.thought.substring(0, 50)}...`;
-      }),
-    ].join('\n');
-
-    // Format recent thoughts in full detail
-    const recentBlock = recentThoughts
-      .map((t) => {
-        let output = `${t.thoughtNumber}. ${t.thought}`;
-        if (t.extensions && t.extensions.length > 0) {
-          const extText = t.extensions
-            .map((e) => `   └── [${e.type.toUpperCase()} - Impact: ${e.impact}]: ${e.content}`)
-            .join('\n');
-          output += `\n${extText}`;
-        }
-        return output;
-      })
-      .join('\n\n');
-
-    return `${condensedBlock}\n\n📍 CURRENT FOCUS (Last ${RETAIN_FULL_THOUGHTS} thoughts):\n${recentBlock}`;
-  }
-
-  /**
-   * Save session state to file for persistence
-   * Uses FS lock to prevent race conditions with concurrent calls
-   * v3.2.0: Atomic write (tmp → rename) for crash safety
-   */
-  async saveSession(): Promise<void> {
-    return this.withFsLock(async () => {
-      await ensureThinkMcpDataDir();
-      const data = {
-        schemaVersion: 2,
-        history: this.thoughtHistory,
-        branches: Array.from(this.branches.entries()),
-        lastThoughtNumber: this.lastThoughtNumber,
-        savedAt: new Date().toISOString(),
-        goal: this.sessionGoal, // v2.10.0 - persist goal
-        currentSessionId: this.currentSessionId, // v2.11.0 - persist sessionId
-        deadEnds: this.deadEnds, // v3.3.0 - persist dead ends
-      };
-
-      const tempFile = `${SESSION_FILE}.tmp`;
-      try {
-        // v3.2.0: Atomic write - write to temp file first, then rename
-        await fs.writeFile(tempFile, JSON.stringify(data, null, 2), 'utf-8');
-        await fs.rename(tempFile, SESSION_FILE);
-      } catch (error) {
-        console.error('Failed to save session:', error);
-        // Clean up temp file if rename failed
-        try { await fs.unlink(tempFile); } catch { /* ignore */ }
-      }
-    });
-  }
-
-  /**
    * Migrate legacy root-level session file to runtime data directory.
    */
   private async migrateLegacySessionIfNeeded(): Promise<void> {
-    try {
-      const migrated = await migrateLegacyFile(LEGACY_SESSION_FILE, SESSION_FILE);
-      if (migrated) {
-        console.error(`📦 Migrated legacy session file to ${SESSION_FILE}`);
-      }
-    } catch (error) {
-      console.error('Failed to migrate legacy session file:', error);
+    const migrated = await migrateLegacyFile(LEGACY_SESSION_FILE, SESSION_FILE);
+    if (migrated) {
+      console.error(`📦 Migrated legacy session file to ${SESSION_FILE}`);
     }
   }
 
   /**
-   * Load session state from file
-   * Call this during initialization to restore previous session
+   * Load the old thought_session.json once so runtime_state.json can import it.
    * Validates JSON structure to prevent corrupted state
    * v3.2.0: Added TTL check - auto-reset if session older than 24h
    */
@@ -878,7 +714,7 @@ export class ThinkingService {
       const hoursOld = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60);
       if (hoursOld > SESSION_TTL_HOURS) {
         console.error(`⏰ Session expired (${Math.round(hoursOld)}h old > ${SESSION_TTL_HOURS}h TTL), auto-resetting...`);
-        await this.clearSession();
+        await this.clearLegacySession();
         return false;
       }
 
@@ -896,15 +732,18 @@ export class ThinkingService {
       this.lastThoughtNumber = data.lastThoughtNumber ?? 0;
       this.sessionGoal = data.goal; // v2.10.0 - restore goal
       this.currentSessionId = data.currentSessionId ?? ''; // v2.11.0 - restore sessionId
+      this.currentScopeId = data.currentScopeId ?? '';
       this.deadEnds = data.deadEnds ?? []; // v3.3.0 - restore dead ends
 
       const deadEndsInfo = this.deadEnds.length > 0 ? `, ${this.deadEnds.length} dead ends` : '';
       console.error(`📂 Restored session v${schemaVersion} from ${data.savedAt} (${this.thoughtHistory.length} thoughts${deadEndsInfo}${this.currentSessionId ? `, session: ${this.currentSessionId.substring(0, 10)}...` : ''})`);
       return true;
     } catch (error) {
-      // File doesn't exist or is corrupted - start fresh
-      console.error('No previous session found or corrupted, starting fresh');
-      return false;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        console.error('No previous session found, starting fresh');
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -917,6 +756,7 @@ export class ThinkingService {
     this.lastThoughtNumber = 0;
     this.sessionGoal = undefined; // Clear goal on reset (v2.10.0)
     this.currentSessionId = ''; // Clear sessionId on reset (v2.11.0)
+    this.currentScopeId = '';
     this.coachingService.reset(); // Clear coach cooldown (v3.2.0)
     this.deadEnds = []; // Clear dead ends (v3.3.0)
     // v4.7.1: Clear word cache to prevent stale data across sessions
@@ -924,28 +764,18 @@ export class ThinkingService {
   }
 
   /**
-   * Clear saved session file only (does NOT reset in-memory state)
-   * Uses FS lock to prevent race conditions with concurrent calls
-   * Note: reset() is called separately in processThought to avoid race condition
+   * Remove the legacy store only after runtime_state initialization succeeds.
    */
-  async clearSession(): Promise<void> {
-    return this.withFsLock(async () => {
+  async clearLegacySession(): Promise<void> {
+    for (const file of new Set([SESSION_FILE, LEGACY_SESSION_FILE])) {
       try {
-        await fs.unlink(SESSION_FILE);
-        console.error('Session file cleared');
-      } catch {
-        // File doesn't exist, ignore
-      }
-      try {
-        if (LEGACY_SESSION_FILE !== SESSION_FILE) {
-          await fs.unlink(LEGACY_SESSION_FILE);
+        await fs.unlink(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.error(`Failed to remove legacy session file ${file}:`, error);
         }
-      } catch {
-        // Legacy file may not exist.
       }
-      // DO NOT call reset() here - it causes race condition with processThought
-      // Memory reset is handled synchronously in processThought before this runs
-    });
+    }
   }
 
   /**
@@ -959,12 +789,15 @@ export class ThinkingService {
       (path, reason) => this.recordDeadEnd(path, reason),
       // v4.1.0: Save insight on successful consolidation
       (path, summary) => {
-        this.insightsService.saveWinningPath({
+        this.saveInsight({
           path,
           summary,
           goal: this.sessionGoal,
           avgConfidence: this.calculateAverageConfidence(),
           sessionLength: this.getCurrentSessionThoughts().length,
+          source: 'think',
+          sessionId: this.currentSessionId || undefined,
+          scopeId: this.currentScopeId || undefined,
         }).catch(err => console.error('Failed to save insight:', err));
       }
     );
@@ -974,16 +807,22 @@ export class ThinkingService {
    * Reset current session and clear persistence
    * Returns info about what was cleared
    */
-  async resetSession(): Promise<{ clearedThoughts: number; clearedBranches: number }> {
-    const clearedThoughts = this.thoughtHistory.length;
-    const clearedBranches = this.branches.size;
+  async resetSession(scopeId?: string): Promise<{ clearedThoughts: number; clearedBranches: number; scopeId?: string }> {
+    const targetScopeId = scopeId ?? (this.currentScopeId || this.runtimeState?.getActiveScopeId());
+    const targetsCurrentScope = !targetScopeId || targetScopeId === this.currentScopeId;
+    const storedState = targetsCurrentScope || !targetScopeId
+      ? undefined
+      : this.runtimeState?.getThinkState(targetScopeId);
+    const clearedThoughts = storedState?.history.length ?? (targetsCurrentScope ? this.thoughtHistory.length : 0);
+    const clearedBranches = storedState?.branches.length ?? (targetsCurrentScope ? this.branches.size : 0);
 
-    this.reset();
-    await this.clearSession();
+    if (targetsCurrentScope) this.reset();
+    this.runtimeState?.clearThinkState(targetScopeId);
+    await this.runtimeState?.flush();
 
     console.error(`🧹 Session reset: cleared ${clearedThoughts} thoughts, ${clearedBranches} branches`);
 
-    return { clearedThoughts, clearedBranches };
+    return { clearedThoughts, clearedBranches, scopeId: targetScopeId };
   }
 
   /**
@@ -1014,7 +853,7 @@ export class ThinkingService {
    * Delegates validation to BurstService, commits results to state
    */
   submitSession(input: SubmitSessionInput): SubmitSessionResult {
-    const { goal, thoughts, consolidation, showTree = false } = input;
+    const { goal, thoughts, consolidation, showTree = false, scopeId } = input;
 
     // Validate using BurstService
     const validation = this.burstService.validate(goal, thoughts, consolidation);
@@ -1028,17 +867,31 @@ export class ThinkingService {
         validation: { passed: false, errors: validation.errors, warnings: validation.warnings },
         metrics: validation.metrics,
         errorMessage: validation.errors.join('; '),
+        scopeId: this.currentScopeId || undefined,
+      };
+    }
+
+    if (scopeId && this.runtimeState && !this.runtimeState.hasScope(scopeId)) {
+      return {
+        status: 'rejected',
+        sessionId: '',
+        thoughtsProcessed: 0,
+        validation: { passed: false, errors: [`[ERR_SCOPE_NOT_FOUND] Unknown scopeId: ${scopeId}`], warnings: [] },
+        metrics: validation.metrics,
+        errorMessage: `[ERR_SCOPE_NOT_FOUND] Unknown scopeId: ${scopeId}`,
       };
     }
 
     // === Commit Session ===
     this.reset();
+    this.currentScopeId = this.resolveScopeForNewThinkSession(scopeId, goal) ?? '';
     this.currentSessionId = new Date().toISOString();
     this.sessionGoal = goal;
 
     // Convert and add thoughts to history
     for (const t of validation.sortedThoughts) {
       const record = this.burstService.toThoughtRecord(t, thoughts.length, this.currentSessionId);
+      record.metadata = { ...(record.metadata ?? {}), source: 'think' };
       this.thoughtHistory.push(record);
       this.lastThoughtNumber = Math.max(this.lastThoughtNumber, t.thoughtNumber);
 
@@ -1051,10 +904,8 @@ export class ThinkingService {
     }
 
     this.invalidateFuseIndex();
+    this.syncRuntimeScope();
     
-    // v5.0.1: Async save - don't block response
-    this.saveSession().catch(err => console.error('Failed to save burst session:', err));
-
     // v5.0.1: Minimal system advice - only real issues
     let systemAdvice: string | undefined;
     if (validation.warnings.length > 0) {
@@ -1063,12 +914,15 @@ export class ThinkingService {
 
     // v5.0.2: Auto-save insight if consolidation with verdict='ready'
     if (consolidation?.verdict === 'ready') {
-      this.insightsService.saveWinningPath({
+      this.saveInsight({
         path: consolidation.winningPath,
         summary: consolidation.summary,
         goal,
         avgConfidence: validation.metrics.avgConfidence,
         sessionLength: thoughts.length,
+        source: 'think',
+        sessionId: this.currentSessionId || undefined,
+        scopeId: this.currentScopeId || undefined,
       }).catch(err => console.error('Failed to save insight:', err));
       systemAdvice = (systemAdvice ? systemAdvice + ' | ' : '') + '💾 Insight saved';
     }
@@ -1097,6 +951,7 @@ export class ThinkingService {
       thoughtTree: showTree ? this.generateAsciiTree() : undefined,
       systemAdvice,
       nudge,
+      scopeId: this.currentScopeId || undefined,
     };
   }
 
@@ -1116,10 +971,15 @@ export class ThinkingService {
    * RECALL THOUGHT - Fuzzy search through thought history
    * Delegates to RecallService
    */
-  recallThought(input: RecallInput): RecallResult {
-    const thoughts = input.scope === 'current' 
-      ? this.getCurrentSessionThoughts() 
-      : this.thoughtHistory;
+  recallThought(input: RecallInput, thoughtsOverride?: ThoughtRecord[]): RecallResult {
+    // Recall can aggregate dynamic sources (e.g. cycle sessions), so rebuild the index against
+    // the exact thought set used for this query instead of reusing stale cached state.
+    this.recallService.invalidateIndex();
+    const thoughts = thoughtsOverride
+      ? [...thoughtsOverride]
+      : input.scope === 'current'
+        ? [...this.getCurrentSessionThoughts()]
+        : [...this.thoughtHistory];
     return this.recallService.recallThought(input, thoughts);
   }
 
@@ -1136,17 +996,10 @@ export class ThinkingService {
   }
 
   /**
-   * Get insights statistics
-   * Delegates to InsightsService
+   * Save an insight so other tool modes can reuse the same insights store.
    */
-  async getInsightsStats(): Promise<{
-    totalInsights: number;
-    totalSessions: number;
-    topPatterns: { keyword: string; count: number }[];
-    avgSessionLength: number;
-    avgConfidence: number;
-  }> {
-    return this.insightsService.getStats();
+  async saveInsight(input: SaveInsightInput): Promise<void> {
+    await this.insightsService.saveWinningPath(input);
   }
 
   /**

@@ -26,6 +26,9 @@ interface FuseSearchItem {
   confidence?: number;
   sessionId?: string;
   originalThought: string;
+  source: 'think' | 'cycle';
+  timestamp: number;
+  mirroredCycleSessionId?: string;
 }
 
 export class RecallService {
@@ -58,6 +61,9 @@ export class RecallService {
         confidence: t.confidence,
         sessionId: t.sessionId,
         originalThought: t.thought,
+        source: t.metadata?.source ?? 'think',
+        timestamp: t.timestamp,
+        mirroredCycleSessionId: t.mirroredCycleSessionId,
       });
 
       // Add extensions
@@ -71,6 +77,8 @@ export class RecallService {
             confidence: t.confidence,
             sessionId: t.sessionId,
             originalThought: t.thought,
+            source: t.metadata?.source ?? 'think',
+            timestamp: t.timestamp,
           });
         }
       }
@@ -85,6 +93,8 @@ export class RecallService {
             confidence: t.confidence,
             sessionId: t.sessionId,
             originalThought: t.thought,
+            source: t.metadata?.source ?? 'think',
+            timestamp: t.timestamp,
           });
         }
       }
@@ -99,12 +109,33 @@ export class RecallService {
             confidence: t.confidence,
             sessionId: t.sessionId,
             originalThought: t.thought,
+            source: t.metadata?.source ?? 'think',
+            timestamp: t.timestamp,
           });
         }
       }
     }
 
-    return items;
+    const cycleKeys = new Set(
+      items
+        .filter((item) => item.source === 'cycle')
+        .map((item) => `${item.sessionId ?? ''}\u0000${item.type}\u0000${item.content}`)
+    );
+    const seen = new Set<string>();
+
+    return items.filter((item) => {
+      const mirrorKey = `${item.type}\u0000${item.content}`;
+      if (
+        item.source === 'think'
+        && item.mirroredCycleSessionId
+        && cycleKeys.has(`${item.mirroredCycleSessionId}\u0000${mirrorKey}`)
+      ) return false;
+
+      const key = [item.source, item.sessionId ?? '', item.thoughtNumber, mirrorKey].join('\u0000');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   /**
@@ -217,8 +248,14 @@ export class RecallService {
       return true;
     });
 
+    const dedupedResults = filteredResults.sort((left, right) => {
+      const scoreDelta = (left.score ?? 1) - (right.score ?? 1);
+      if (scoreDelta !== 0) return scoreDelta;
+      return right.item.timestamp - left.item.timestamp;
+    });
+
     // Map to RecallMatch format
-    const matches: RecallMatch[] = filteredResults.slice(0, limit).map((r) => ({
+    const matches: RecallMatch[] = dedupedResults.slice(0, limit).map((r) => ({
       thoughtNumber: r.item.thoughtNumber,
       snippet: this.extractSnippet(r.item.content, query),
       thought:
@@ -230,6 +267,7 @@ export class RecallService {
       matchedIn: r.item.type,
       extensionType: r.item.extensionType as ExtensionType | undefined,
       sessionId: r.item.sessionId,
+      source: r.item.source,
     }));
 
     // Log search
