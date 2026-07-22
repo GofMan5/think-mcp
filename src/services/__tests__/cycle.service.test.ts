@@ -905,7 +905,7 @@ describe.sequential('CycleService', () => {
     expect(backend.saveInsight).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps confidence stability unmeasured when confidence is omitted', async () => {
+  it('keeps confidence stability unmeasured with fewer than two confidence values', async () => {
     const service = await createService();
     const started = await service.handle({
       action: 'start',
@@ -913,12 +913,13 @@ describe.sequential('CycleService', () => {
       goal: 'Measure confidence honestly when a model leaves confidence unspecified',
     });
 
-    for (const template of robustCycleSteps.slice(0, 2)) {
+    for (const [index, template] of robustCycleSteps.slice(0, 2).entries()) {
       await service.handle({
         action: 'step',
         sessionId: started.sessionId,
         thoughtType: template.thoughtType,
         thought: template.thought,
+        confidence: index === 0 ? 7 : undefined,
       });
     }
 
